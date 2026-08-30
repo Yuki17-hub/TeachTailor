@@ -1,0 +1,2122 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>TeachTailor</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'Noto Sans JP', 'sans-serif']
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    html, body { touch-action: manipulation; } /* ダブルタップ拡大の抑制 */
+    html, body { overflow-x: hidden; }          /* 横方向のブレを防ぐ保険 */
+    /* 長い英単語や項目名がカードを押し広げないようにする */
+    #tab-manage p, #tab-history p { overflow-wrap: anywhere; }
+    body { font-family: 'Inter', 'Noto Sans JP', sans-serif; }
+
+    /* スクロールバーを控えめに */
+    .slim-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+    .slim-scroll::-webkit-scrollbar-track { background: transparent; }
+    .slim-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 9999px; }
+    .slim-scroll::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+    /* タブ切替 */
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; animation: fadeIn .18s ease-out; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+    @media (prefers-reduced-motion: reduce) {
+      .tab-panel.active { animation: none; }
+    }
+
+    /* トースト */
+    #toast { transition: opacity .25s ease, transform .25s ease; }
+
+    /* ===== 印刷制御 =====
+       印刷時はプレビューエリアの中身のみを出力し、
+       高さ制限・エリア内スクロールを解除して全体を印刷する */
+    @media print {
+      body { background: #fff !important; }
+      body * { visibility: hidden; }
+      #previewArea, #previewArea * { visibility: visible; }
+      #previewArea {
+        position: absolute;
+        left: 0; top: 0;
+        width: 100%;
+        max-height: none !important;
+        overflow: visible !important;
+        border: none !important;
+        border-radius: 0 !important;
+        box-shadow: none !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        background: #fff !important;
+      }
+      .student-page { page-break-after: always; break-after: page; }
+      /* 両面印刷対応: 講師用ページは必ず「新しい用紙の表面（奇数ページ）」から開始する。
+         これにより生徒用ページの枚数が奇数でも偶数でも、生徒用プリントの裏面に解答が印刷されない */
+      .teacher-page { page-break-before: right; break-before: right; }
+    }
+
+    /* ============================================================
+       TeachTailor ワークシート印刷テンプレート (ws- 固定クラス)
+       ============================================================ */
+    .ws-page {
+      color: #111;
+      font-size: 10.5pt;
+      line-height: 1.8;
+    }
+    .ws-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      border-bottom: 3px solid #111;
+      padding-bottom: 6px;
+      margin-bottom: 14px;
+      gap: 12px;
+    }
+    .ws-title h1 {
+      font-size: 15pt;
+      font-weight: 700;
+      margin: 0;
+      letter-spacing: .02em;
+    }
+    .ws-meta {
+      display: flex;
+      align-items: flex-end;
+      gap: 14px;
+      font-size: 8.5pt;
+      color: #333;
+      white-space: nowrap;
+    }
+    .ws-source {
+      border: 1px solid #333;
+      border-radius: 3px;
+      padding: 1px 8px;
+      font-weight: 500;
+    }
+    .ws-aim {
+      border: 1.5px solid #111;
+      padding: 8px 12px;
+      margin: 0 0 18px;
+      font-size: 9.5pt;
+    }
+    .ws-aim-label {
+      display: inline-block;
+      font-weight: 700;
+      font-size: 8.5pt;
+      border: 1px solid #111;
+      padding: 0 6px;
+      margin-right: 8px;
+      vertical-align: 1px;
+    }
+    .ws-section {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11.5pt;
+      font-weight: 700;
+      border-bottom: 1.5px solid #111;
+      padding-bottom: 3px;
+      margin: 22px 0 10px;
+    }
+    .ws-section .ws-num {
+      background: #111;
+      color: #fff;
+      font-size: 9.5pt;
+      line-height: 1;
+      padding: 4px 7px;
+      border-radius: 3px;
+    }
+    .ws-vocab {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 9.5pt;
+      margin: 8px 0 4px;
+    }
+    .ws-vocab th, .ws-vocab td {
+      border: 1px solid #333;
+      padding: 5px 8px;
+      vertical-align: top;
+      text-align: left;
+    }
+    .ws-vocab th {
+      background: #ececec;
+      font-weight: 700;
+      font-size: 8.5pt;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .ws-vocab .ws-pos { width: 2.5em; text-align: center; white-space: nowrap; }
+    .ws-vocab .ws-word { width: 22%; font-weight: 700; }
+    .ws-vocab .ws-memo { width: 34%; font-size: 8.5pt; color: #222; }
+    .ws-q { margin: 0 0 14px; }
+    .ws-q p { margin: 0 0 4px; }
+    .ws-en { font-size: 10.5pt; line-height: 2.1; margin: 4px 0; }
+    .ws-write { border-bottom: 1px solid #555; height: 2.2em; margin: 4px 0; }
+    /* ws-aim / ws-aim-label / ws-note / ws-q は現行のプロンプトでは使用しないが、
+       過去に履歴保存したプリントを再印刷したときに崩れないよう残している */
+    .ws-note { font-size: 8.5pt; color: #333; }
+    .ws-ref {
+      font-size: 8.5pt;
+      color: #333;
+      white-space: nowrap;
+    }
+    /* 単語テストなど、短い設問を2列に流し込むためのクラス */
+    .ws-2col {
+      column-count: 2;
+      column-gap: 28px;
+      column-rule: 1px solid #ccc;
+    }
+    .ws-2col > * { break-inside: avoid; }
+    ol.ws-2col { margin: 4px 0; padding-left: 1.6em; }
+    ul.ws-list { margin: 4px 0; padding-left: 1.4em; }
+    ol.ws-list { margin: 4px 0; padding-left: 1.6em; }
+    ol.ws-list li { margin: 2px 0; }
+    .teacher-page { font-size: 9.5pt; line-height: 1.7; }
+    .ws-t-h {
+      font-weight: 700;
+      border-bottom: 1px solid #111;
+      margin: 18px 0 6px;
+      padding-bottom: 2px;
+      font-size: 10pt;
+    }
+    .ws-t-h:first-child { margin-top: 0; }
+    .ws-check { list-style: none; margin: 4px 0; padding: 0; }
+    .ws-check li { margin: 3px 0; }
+    .ws-check li::before { content: "□ "; }
+    /* チェックリストを2列にする場合、段の間に余白を確保する */
+    .ws-check.ws-2col li { padding-right: 6px; }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-800 min-h-screen antialiased">
+
+  <div class="max-w-5xl mx-auto px-4 sm:px-6 pt-3 sm:pt-10 pb-32 sm:pb-10">
+
+    <!-- ヘッダー -->
+    <header class="sticky sm:static top-0 z-30 -mx-4 sm:mx-0 px-4 sm:px-0 py-2.5 sm:py-0 mb-4 sm:mb-8 flex items-center gap-3 bg-slate-100/90 sm:bg-transparent backdrop-blur sm:backdrop-blur-none border-b border-slate-200/70 sm:border-0">
+      <div class="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-slate-800 text-white flex items-center justify-center shadow-sm shrink-0">
+        <!-- pencil icon -->
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="w-5 h-5">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" />
+        </svg>
+      </div>
+      <div class="flex-1 min-w-0">
+        <h1 class="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">TeachTailor <span class="text-[10px] font-normal text-slate-400 align-middle">v1.5.1</span></h1>
+        <p class="hidden sm:block text-sm text-slate-500">生徒カルテ × 学習ログで、個別最適化プリント用プロンプトを自動生成</p>
+      </div>
+      <!-- グローバル生徒セレクター: 全タブがこの選択に追従する -->
+      <div class="relative shrink-0">
+        <select id="globalStudentSelect"
+          class="appearance-none rounded-full border border-slate-300 bg-white pl-8 pr-7 py-1.5 text-xs sm:text-sm font-medium text-slate-800 max-w-[10rem] sm:max-w-none truncate focus:outline-none focus:ring-2 focus:ring-slate-400">
+          <option value="">生徒を選択</option>
+        </select>
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+        </svg>
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-3 h-3 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+        </svg>
+      </div>
+    </header>
+
+    <!-- ピル型タブメニュー -->
+    <nav class="hidden sm:inline-flex flex-wrap items-center gap-1 bg-slate-200/70 rounded-full p-1 mb-8" role="tablist" aria-label="メインメニュー">
+      <button type="button" data-tab="tab-prompt" role="tab" aria-selected="true"
+        class="tab-btn inline-flex items-center gap-1.5 px-4 sm:px-5 py-2 rounded-full text-sm font-medium transition-colors bg-white text-slate-900 shadow-sm">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="w-4 h-4">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+        </svg>
+        <span>作成</span>
+      </button>
+      <button type="button" data-tab="tab-preview" role="tab" aria-selected="false"
+        class="tab-btn inline-flex items-center gap-1.5 px-4 sm:px-5 py-2 rounded-full text-sm font-medium transition-colors text-slate-600 hover:text-slate-900">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="w-4 h-4">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M6.72 13.829c-.24.03-.48.062-.72.096m.72-.096a42.415 42.415 0 0110.56 0m-10.56 0L6.34 18m10.94-4.171c.24.03.48.062.72.096m-.72-.096L17.66 18m0 0l.229 2.523a1.125 1.125 0 01-1.12 1.227H7.231c-.662 0-1.18-.568-1.12-1.227L6.34 18m11.318 0h1.091A2.25 2.25 0 0021 15.75V9.456c0-1.081-.768-2.015-1.837-2.175a48.055 48.055 0 00-1.913-.247M6.34 18H5.25A2.25 2.25 0 013 15.75V9.456c0-1.081.768-2.015 1.837-2.175a48.041 48.041 0 011.913-.247m10.5 0a48.536 48.536 0 00-10.5 0m10.5 0V3.375c0-.621-.504-1.125-1.125-1.125h-8.25c-.621 0-1.125.504-1.125 1.125v3.659M18 10.5h.008v.008H18V10.5z" />
+        </svg>
+        <span>印刷</span>
+      </button>
+      <button type="button" data-tab="tab-manage" role="tab" aria-selected="false"
+        class="tab-btn inline-flex items-center gap-1.5 px-4 sm:px-5 py-2 rounded-full text-sm font-medium transition-colors text-slate-600 hover:text-slate-900">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="w-4 h-4">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25z" />
+        </svg>
+        <span>管理</span>
+      </button>
+      <button type="button" data-tab="tab-history" role="tab" aria-selected="false"
+        class="tab-btn inline-flex items-center gap-1.5 px-4 sm:px-5 py-2 rounded-full text-sm font-medium transition-colors text-slate-600 hover:text-slate-900">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="w-4 h-4">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <span>履歴</span>
+      </button>
+    </nav>
+
+    <!-- ============ タブ1: プロンプト作成 ============ -->
+    <section id="tab-prompt" class="tab-panel active" role="tabpanel">
+      <!-- あとで記録（授業後のチェック項目。未処理があるときだけ表示） -->
+      <div id="pendingPanel" class="hidden mb-5 rounded-2xl border border-amber-200 bg-amber-50/60 p-4 sm:p-5">
+        <div class="flex items-center justify-between gap-2 mb-1">
+          <h2 class="text-base font-semibold text-slate-900 flex items-center gap-1.5">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="w-4 h-4 text-amber-600">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+            </svg>
+            あとで記録
+          </h2>
+          <span id="pendingCount" class="text-xs font-medium text-amber-800 bg-amber-100 rounded-full px-2.5 py-0.5"></span>
+        </div>
+        <p class="text-xs text-slate-600 mb-3">授業で使ったプリントの定着度チェックです。できていなかった項目にチェックして登録してください。</p>
+        <div id="pendingList" class="grid gap-3"></div>
+      </div>
+
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-7">
+        <h2 class="text-base font-semibold text-slate-900 mb-5">個別最適化プリント用プロンプトを生成</h2>
+
+        <div class="grid gap-5">
+          <!-- 出力モード -->
+          <fieldset>
+            <legend class="block text-sm font-medium text-slate-700 mb-1.5">出力モード</legend>
+            <div class="grid sm:grid-cols-2 gap-3">
+              <label class="relative flex cursor-pointer rounded-xl border border-slate-200 bg-slate-50 p-4 has-[:checked]:border-slate-800 has-[:checked]:bg-white has-[:checked]:ring-1 has-[:checked]:ring-slate-800 transition-colors">
+                <input type="radio" name="outputMode" value="A" checked class="sr-only">
+                <div>
+                  <p class="text-sm font-semibold text-slate-900">授業プリント</p>
+                  <p class="text-xs text-slate-400 mt-1.5">教材から確認問題と重要単語を作成</p>
+                </div>
+              </label>
+              <label class="relative flex cursor-pointer rounded-xl border border-slate-200 bg-slate-50 p-4 has-[:checked]:border-slate-800 has-[:checked]:bg-white has-[:checked]:ring-1 has-[:checked]:ring-slate-800 transition-colors">
+                <input type="radio" name="outputMode" value="C" class="sr-only">
+                <div>
+                  <p class="text-sm font-semibold text-slate-900">単語テスト</p>
+                  <p class="text-xs text-slate-400 mt-1.5">未定着の単語から意味を問う小テストを作成。出したい単語を直接指定することもできます</p>
+                </div>
+              </label>
+            </div>
+          </fieldset>
+
+          <!-- 収録するセクションの選択（授業プリントのみ） -->
+          <div id="sectionWrap" class="hidden">
+            <span class="block text-sm font-medium text-slate-700 mb-1.5">プリントに入れる内容</span>
+            <div class="grid sm:grid-cols-2 gap-2">
+              <button type="button" data-section="review" aria-pressed="true"
+                class="section-btn relative overflow-hidden text-left rounded-xl border pl-4 pr-9 py-2.5 transition-colors border-slate-800 bg-white">
+                <span class="section-bar absolute left-0 top-0 bottom-0 w-1.5 bg-slate-800"></span>
+                <span class="section-title block text-sm font-semibold text-slate-900">前回の復習</span>
+                <span class="section-desc block text-[11px] text-slate-500">未定着項目から1〜2問</span>
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"
+                  class="section-check absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-800">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                </svg>
+              </button>
+              <button type="button" data-section="check" aria-pressed="true"
+                class="section-btn relative overflow-hidden text-left rounded-xl border pl-4 pr-9 py-2.5 transition-colors border-slate-800 bg-white">
+                <span class="section-bar absolute left-0 top-0 bottom-0 w-1.5 bg-slate-800"></span>
+                <span class="section-title block text-sm font-semibold text-slate-900">確認問題</span>
+                <span class="section-desc block text-[11px] text-slate-500">今回の教材から出題</span>
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"
+                  class="section-check absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-800">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                </svg>
+              </button>
+            </div>
+            <p class="mt-1 text-xs text-slate-500">タップで切り替えられます。重要単語の表は常に入ります。</p>
+          </div>
+
+          <!-- 問題数の目安 -->
+          <div id="questionCountWrap">
+            <label for="questionCountSelect" class="block text-sm font-medium text-slate-700 mb-1.5">問題数の目安</label>
+            <select id="questionCountSelect"
+              class="w-full sm:max-w-xs rounded-lg border-slate-300 border bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-slate-400">
+              <option value="">おまかせ</option>
+              <option value="5問程度">5問</option>
+              <option value="10問程度">10問</option>
+              <option value="15問程度">15問</option>
+              <option value="20問程度">20問</option>
+            </select>
+          </div>
+
+          <!-- 題材・テーマ（任意。教材写真の代わり/補足として使用） -->
+          <div id="topicWrap">
+            <label for="topicInput" class="block text-sm font-medium text-slate-700 mb-1.5">題材・テーマ（任意）</label>
+            <textarea id="topicInput" rows="2" placeholder="例: 不定詞の3用法の総復習。特にit is ... for A to Vの形を中心に"
+              data-placeholder-b="例: 不定詞の3用法の総復習。特にit is ... for A to Vの形を中心に"
+              data-placeholder-c="例: decide, hope, plan, refuse, manage（この5語から出題）"
+              class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-slate-400"></textarea>
+            <p id="topicHint" class="mt-1 text-xs text-slate-500">教材の写真を添付しない場合はここに出題内容を書きます。写真と併用も可能です。</p>
+          </div>
+
+          <!-- プリントの題名（任意） -->
+          <div>
+            <label for="sheetTitleInput" class="block text-sm font-medium text-slate-700 mb-1.5">プリントの題名（任意）</label>
+            <input id="sheetTitleInput" type="text" placeholder="例: 受動態の整理と演習"
+              class="w-full sm:max-w-sm rounded-lg border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-slate-400">
+            <p class="mt-1 text-xs text-slate-500">空欄ならAIが内容に合わせて付けます。</p>
+          </div>
+
+          <!-- 生成ボタン -->
+          <div>
+            <button type="button" id="generateBtn"
+              class="inline-flex items-center gap-2 rounded-lg bg-slate-800 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="w-4 h-4">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15.59 14.37a6 6 0 01-5.84 7.38v-4.8m5.84-2.58a14.98 14.98 0 006.16-12.12A14.98 14.98 0 009.631 8.41m5.96 5.96a14.926 14.926 0 01-5.841 2.58m-.119-8.54a6 6 0 00-7.381 5.84h4.8m2.581-5.84a14.927 14.927 0 00-2.58 5.84m2.699 2.7c-.103.021-.207.041-.311.06a15.09 15.09 0 01-2.448-2.448 14.9 14.9 0 01.06-.312m-2.24 2.39a4.493 4.493 0 00-1.757 4.306 4.493 4.493 0 004.306-1.758M16.5 9a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" />
+              </svg>
+              <span id="generateBtnLabel">プロンプト生成</span>
+            </button>
+          </div>
+
+          <!-- 生成結果 -->
+          <div id="promptResultWrap" class="hidden">
+            <div class="flex flex-wrap items-center justify-between gap-y-2 mb-1.5">
+              <label for="promptOutput" class="text-sm font-medium text-slate-700">生成されたプロンプト</label>
+              <div class="flex items-center gap-2 sm:gap-3 ml-auto">
+                <span id="promptCharCount" class="text-xs text-slate-400 whitespace-nowrap"></span>
+                <button type="button" id="clearPromptBtn"
+                  class="inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-400 transition-colors">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="w-3.5 h-3.5">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9.75 9.75l4.5 4.5m0-4.5l-4.5 4.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  クリア
+                </button>
+                <button type="button" id="copyBtn"
+                  class="inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-400 transition-colors">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="w-3.5 h-3.5">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
+                  </svg>
+                  <span id="copyBtnLabel">コピー</span>
+                </button>
+              </div>
+            </div>
+            <textarea id="promptOutput" readonly rows="16"
+              class="slim-scroll w-full rounded-xl border border-slate-300 bg-slate-50 p-4 text-xs sm:text-sm leading-relaxed text-slate-700 font-mono focus:outline-none focus:ring-2 focus:ring-slate-400"></textarea>
+            <p class="mt-2 text-xs text-slate-500">コピーして、教材の画像と一緒に外部AI（Gemini・Claudeなど）へ貼り付けてください。</p>
+            <button type="button" id="goToPreviewBtn"
+              class="mt-3 w-full inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-400 transition-colors">
+              AIの出力を貼り付ける
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ タブ2: 印刷プレビュー ============ -->
+    <section id="tab-preview" class="tab-panel" role="tabpanel">
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-7">
+        <h2 class="text-base font-semibold text-slate-900 mb-5">AIが出力したHTMLをプレビュー・印刷</h2>
+
+        <div class="flex items-center justify-between gap-2 mb-1.5">
+          <label for="htmlInput" class="text-sm font-medium text-slate-700">HTML貼り付けエリア</label>
+          <button type="button" id="pasteHtmlBtn"
+            class="inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-400 transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="w-3.5 h-3.5">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
+            </svg>
+            <span id="pasteHtmlBtnLabel">貼り付け</span>
+          </button>
+        </div>
+        <textarea id="htmlInput" rows="8" placeholder="外部AIが出力したHTMLをここに貼り付けてください"
+          class="slim-scroll w-full rounded-xl border border-slate-300 bg-slate-50 p-4 text-xs sm:text-sm leading-relaxed text-slate-700 font-mono focus:outline-none focus:ring-2 focus:ring-slate-400"></textarea>
+
+        <div class="grid grid-cols-3 sm:flex sm:flex-wrap items-center gap-2 sm:gap-3 mt-4 mb-6">
+          <button type="button" id="updatePreviewBtn"
+            class="inline-flex items-center justify-center gap-1.5 sm:gap-2 whitespace-nowrap rounded-lg bg-slate-800 px-2 sm:px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-2 transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="w-4 h-4">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+            </svg>
+            <span class="sm:hidden">更新</span><span class="hidden sm:inline">プレビュー更新</span>
+          </button>
+          <button type="button" id="printBtn"
+            class="inline-flex items-center justify-center gap-1.5 sm:gap-2 whitespace-nowrap rounded-lg border border-slate-300 bg-white px-2 sm:px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-400 transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="w-4 h-4">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6.72 13.829c-.24.03-.48.062-.72.096m.72-.096a42.415 42.415 0 0110.56 0m-10.56 0L6.34 18m10.94-4.171c.24.03.48.062.72.096m-.72-.096L17.66 18m0 0l.229 2.523a1.125 1.125 0 01-1.12 1.227H7.231c-.662 0-1.18-.568-1.12-1.227L6.34 18m11.318 0h1.091A2.25 2.25 0 0021 15.75V9.456c0-1.081-.768-2.015-1.837-2.175a48.055 48.055 0 00-1.913-.247M6.34 18H5.25A2.25 2.25 0 013 15.75V9.456c0-1.081.768-2.015 1.837-2.175a48.041 48.041 0 011.913-.247m10.5 0a48.536 48.536 0 00-10.5 0m10.5 0V3.375c0-.621-.504-1.125-1.125-1.125h-8.25c-.621 0-1.125.504-1.125 1.125v3.659M18 10.5h.008v.008H18V10.5z" />
+            </svg>
+            印刷
+          </button>
+          <button type="button" id="clearPreviewBtn"
+            class="inline-flex items-center justify-center gap-1.5 sm:gap-2 whitespace-nowrap rounded-lg border border-slate-300 bg-white px-2 sm:px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-400 transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="w-4 h-4">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9.75 9.75l4.5 4.5m0-4.5l-4.5 4.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            クリア
+          </button>
+        </div>
+
+        <p class="text-sm font-medium text-slate-700 mb-1.5">プレビュー</p>
+        <!-- スマホ閲覧時に縦長になりすぎないよう高さ制限＋エリア内スクロール（印刷時は解除） -->
+        <div id="previewArea"
+          class="slim-scroll scroll-mt-16 sm:scroll-mt-4 max-h-[60vh] overflow-y-auto rounded-xl border border-slate-300 bg-white p-5 sm:p-6">
+          <p class="text-sm text-slate-400">HTMLを貼り付けて「プレビュー更新」を押すと、ここに表示されます。</p>
+        </div>
+
+        <!-- 検出された学習ログ項目（チェックリストのdata-log属性から自動抽出） -->
+        <div id="detectedLogPanel" class="hidden mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:p-5">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-sm font-semibold text-slate-900 flex items-center gap-1.5">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="w-4 h-4 text-slate-500">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              検出された学習ログ項目
+            </h3>
+            <span id="detectedLogCount" class="text-xs text-slate-500"></span>
+          </div>
+
+          <div id="detectedLogItems" class="grid gap-2 mb-4"></div>
+
+          <button type="button" id="registerDetectedLogsBtn"
+            class="inline-flex items-center gap-2 rounded-lg bg-slate-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-2 disabled:opacity-50 transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="w-4 h-4">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+            <span id="registerDetectedLogsBtnLabel">選択した項目をログに追加</span>
+          </button>
+        </div>
+
+        <!-- 履歴に保存（再印刷・振り返り用） -->
+        <div id="historySavePanel" class="hidden mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:p-5">
+          <h3 class="text-sm font-semibold text-slate-900 mb-3 flex items-center gap-1.5">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="w-4 h-4 text-slate-500">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            このプリントを授業で使う
+          </h3>
+          <div class="flex flex-wrap items-end gap-2">
+            <button type="button" id="saveHistoryBtn"
+              class="inline-flex items-center gap-2 rounded-lg bg-slate-800 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-2 disabled:opacity-50 transition-colors shrink-0">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="w-4 h-4">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+              </svg>
+              <span id="saveHistoryBtnLabel">授業で使う</span>
+            </button>
+          </div>
+          <p class="mt-2 text-xs text-slate-500">履歴に保存され、チェック項目は授業後に記録できるよう預かります。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ タブ3: カルテ・ログ管理 ============ -->
+    <section id="tab-manage" class="tab-panel" role="tabpanel">
+      <!-- 今この子について: 毎週動く情報（方針・メモ）だけをまとめた常時表示カード -->
+      <div id="focusCard" class="hidden mb-6 rounded-2xl border border-slate-800 bg-slate-800 text-white shadow-sm overflow-hidden">
+        <div class="flex items-center justify-between gap-2 px-5 pt-4 pb-3">
+          <h2 class="text-sm font-semibold tracking-wide flex items-center gap-1.5">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="w-4 h-4 text-slate-400">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" />
+            </svg>
+            今この子について
+          </h2>
+          <button type="button" id="focusEditBtn"
+            class="inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 rounded-lg bg-white/10 px-3 py-1 text-xs font-medium text-white hover:bg-white/20 focus:outline-none focus:ring-2 focus:ring-white/40 transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="w-3.5 h-3.5">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+            </svg>
+            <span id="focusEditBtnLabel">編集</span>
+          </button>
+        </div>
+
+        <!-- 閲覧モード -->
+        <div id="focusView" class="px-5 pb-4 grid gap-3">
+          <div>
+            <p class="text-[11px] font-semibold text-slate-400 mb-0.5">指導方針</p>
+            <p id="focusPolicyText" class="text-sm leading-relaxed text-white [overflow-wrap:anywhere]"></p>
+          </div>
+          <div class="border-t border-white/10 pt-3">
+            <p class="text-[11px] font-semibold text-slate-400 mb-0.5">前回のメモ</p>
+            <p id="focusMemoText" class="text-sm leading-relaxed text-white [overflow-wrap:anywhere]"></p>
+          </div>
+        </div>
+
+        <!-- 編集モード -->
+        <div id="focusEdit" class="hidden px-5 pb-4 grid gap-3">
+          <div>
+            <label for="fPolicy" class="block text-[11px] font-semibold text-slate-400 mb-1">
+              指導方針<span class="font-normal">（プリントの作り方に強く反映されます）</span>
+            </label>
+            <textarea id="fPolicy" rows="2" placeholder="例: 文法を一つずつ詰めるより、英文に多く触れさせたいフェーズ"
+              class="w-full rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-sm text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-white/40"></textarea>
+          </div>
+          <div>
+            <label for="studentMemo" class="block text-[11px] font-semibold text-slate-400 mb-1">
+              前回のメモ<span class="font-normal">（次回やること・授業後の気づき）</span>
+            </label>
+            <textarea id="studentMemo" rows="2" placeholder="例: 次回は不定詞の続きから。宿題の長文を最初に答え合わせ"
+              class="w-full rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-sm text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-white/40"></textarea>
+          </div>
+          <div class="flex items-center gap-2">
+            <button type="button" id="saveFocusBtn"
+              class="inline-flex items-center gap-2 rounded-lg bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-white/50 disabled:opacity-50 transition-colors">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="w-4 h-4">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+              </svg>
+              <span id="saveFocusBtnLabel">保存</span>
+            </button>
+            <button type="button" id="cancelFocusBtn"
+              class="rounded-lg px-3 py-2 text-sm font-medium text-slate-300 hover:text-white transition-colors">キャンセル</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid lg:grid-cols-5 gap-6 items-start min-w-0">
+
+        <!-- 生徒カルテ フォーム（スマホではログの下に表示。デフォルト折りたたみ） -->
+        <div class="order-2 lg:order-1 lg:col-span-2 min-w-0 bg-white rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-6">
+          <div class="flex items-center justify-between gap-2">
+            <button type="button" id="toggleKarteBtn" class="flex items-center gap-2 text-base font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400 rounded-lg -ml-1 px-1" aria-expanded="false" aria-controls="karteFormBody">
+              <svg id="karteChevron" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 text-slate-500 transition-transform">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+              </svg>
+              生徒カルテ
+            </button>
+            <button type="button" id="newStudentBtn"
+              class="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-400 transition-colors">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="w-3.5 h-3.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+              </svg>
+              新規作成
+            </button>
+          </div>
+
+          <div id="karteFormBody" class="hidden mt-4">
+          <p id="karteTarget" class="mb-3 rounded-lg bg-slate-100 px-3 py-2 text-xs font-medium text-slate-600"></p>
+
+          <div class="grid gap-3">
+            <input type="hidden" id="fId" value="">
+            <div>
+              <label for="fName" class="block text-xs font-medium text-slate-500 mb-1">管理名（本名以外を推奨）</label>
+              <input id="fName" type="text" placeholder="例: 火18:00 中2英語"
+                class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-slate-400">
+            </div>
+            <div>
+              <label for="fGrade" class="block text-xs font-medium text-slate-500 mb-1">学年</label>
+              <input id="fGrade" type="text" placeholder="例: 中学2年"
+                class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-slate-400">
+            </div>
+            <div>
+              <label for="fLevel" class="block text-xs font-medium text-slate-500 mb-1">学習度合</label>
+              <input id="fLevel" type="text" placeholder="例: 基礎は概ね定着、応用問題に苦手意識"
+                class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-slate-400">
+            </div>
+            <div>
+              <label for="fShortGoal" class="block text-xs font-medium text-slate-500 mb-1">短期目標</label>
+              <input id="fShortGoal" type="text" placeholder="例: 次回の定期テストで80点"
+                class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-slate-400">
+            </div>
+            <div>
+              <label for="fGoal" class="block text-xs font-medium text-slate-500 mb-1">目標</label>
+              <input id="fGoal" type="text" placeholder="例: 志望校に合格する"
+                class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-slate-400">
+            </div>
+            <div>
+              <label for="fEnvironment" class="block text-xs font-medium text-slate-500 mb-1">環境</label>
+              <input id="fEnvironment" type="text" placeholder="例: 野球部で平日は21時まで練習"
+                class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-slate-400">
+            </div>
+            <div>
+              <label for="fPersonality" class="block text-xs font-medium text-slate-500 mb-1">性格</label>
+              <textarea id="fPersonality" rows="2" placeholder="例: 負けず嫌いだが、長い文章を読むのが苦手"
+                class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-slate-400"></textarea>
+            </div>
+            <button type="button" id="saveStudentBtn"
+              class="mt-1 inline-flex items-center justify-center gap-2 rounded-lg bg-slate-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-2 disabled:opacity-50 transition-colors">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="w-4 h-4">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+              </svg>
+              <span id="saveStudentBtnLabel">カルテを保存</span>
+            </button>
+          </div>
+          </div><!-- /karteFormBody -->
+        </div>
+
+        <!-- 学習ログ（スマホでは先頭に表示） -->
+        <div class="order-1 lg:order-2 lg:col-span-3 min-w-0 bg-white rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-6">
+          <h2 class="text-base font-semibold text-slate-900 mb-4">学習ログ</h2>
+
+          <!-- 未定着項目の追加（入力欄。下の絞り込みとは役割が違うので枠で囲って分離する） -->
+          <div id="addLogWrap" class="hidden mb-5 rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+            <label for="newLogItem" class="flex items-center gap-1.5 text-sm font-semibold text-slate-800 mb-2">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 text-slate-500">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+              </svg>
+              未定着項目を追加する
+            </label>
+            <div class="flex gap-2">
+              <div class="inline-flex shrink-0 rounded-lg bg-slate-100 p-0.5" role="group" aria-label="項目の種類">
+                <button type="button" data-new-log-type="文法" class="new-log-type-btn rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors bg-white text-slate-900 shadow-sm">文法</button>
+                <button type="button" data-new-log-type="単語" class="new-log-type-btn rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors text-slate-500">単語</button>
+              </div>
+              <input id="newLogItem" type="text" placeholder="例: 仮定法過去完了の形"
+                class="flex-1 min-w-0 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-slate-400">
+              <button type="button" id="addLogBtn" aria-label="追加"
+                class="inline-flex items-center justify-center rounded-lg bg-slate-800 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-2 disabled:opacity-50 transition-colors shrink-0">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- 絞り込み（記録済み一覧の表示切替。上の入力欄とは役割が異なる） -->
+          <div id="logFilters" class="hidden mb-3">
+            <p class="flex items-center gap-1.5 text-sm font-semibold text-slate-800 mb-2">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 text-slate-500">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 3c2.755 0 5.455.232 8.083.678.533.09.917.556.917 1.096v1.044a2.25 2.25 0 01-.659 1.591l-5.432 5.432a2.25 2.25 0 00-.659 1.591v2.927a2.25 2.25 0 01-1.244 2.013L9.75 21v-6.568a2.25 2.25 0 00-.659-1.591L3.659 7.409A2.25 2.25 0 013 5.818V4.774c0-.54.384-1.006.917-1.096A48.32 48.32 0 0112 3z" />
+              </svg>
+              記録した項目を見る
+            </p>
+            <p class="text-[11px] text-slate-400 mb-2 -mt-1">未定着のままの項目が次回のプリントに出ます。定着に切り替える判断は先生にお任せします。</p>
+            <div class="flex w-full rounded-xl bg-slate-100 p-1" role="group" aria-label="ステータスで絞り込み">
+              <button type="button" data-status-filter="未定着"
+                class="status-filter-btn flex-1 rounded-lg px-2 py-1.5 text-xs font-semibold transition-colors bg-white text-slate-900 shadow-sm">
+                未定着 <span id="cntWeak" class="tabular-nums opacity-60"></span>
+              </button>
+              <button type="button" data-status-filter="定着"
+                class="status-filter-btn flex-1 rounded-lg px-2 py-1.5 text-xs font-semibold transition-colors text-slate-500">
+                定着 <span id="cntDone" class="tabular-nums opacity-60"></span>
+              </button>
+              <button type="button" data-status-filter="すべて"
+                class="status-filter-btn flex-1 rounded-lg px-2 py-1.5 text-xs font-semibold transition-colors text-slate-500">
+                すべて <span id="cntAll" class="tabular-nums opacity-60"></span>
+              </button>
+            </div>
+            <!-- 種類の絞り込みは、文法と単語が両方あるときだけ出す -->
+            <div id="typeFilterWrap" class="hidden mt-2 justify-center">
+              <div class="inline-flex rounded-lg bg-slate-100 p-0.5" role="group" aria-label="種類で絞り込み">
+                <button type="button" data-type-filter="すべて" class="type-filter-btn rounded-md px-3 py-1 text-[11px] font-semibold transition-colors bg-white text-slate-900 shadow-sm">文法＋単語</button>
+                <button type="button" data-type-filter="文法" class="type-filter-btn rounded-md px-3 py-1 text-[11px] font-semibold transition-colors text-slate-500">文法</button>
+                <button type="button" data-type-filter="単語" class="type-filter-btn rounded-md px-3 py-1 text-[11px] font-semibold transition-colors text-slate-500">単語</button>
+              </div>
+            </div>
+          </div>
+
+          <div id="logList" class="grid gap-2">
+            <p class="text-sm text-slate-400">生徒を選択すると、学習ログが表示されます。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ タブ4: 履歴 ============ -->
+    <section id="tab-history" class="tab-panel" role="tabpanel">
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-7">
+        <h2 class="text-base font-semibold text-slate-900 mb-5">出力履歴（再印刷・授業の振り返り）</h2>
+
+        <div id="historyList" class="grid gap-2">
+          <p class="text-sm text-slate-400">生徒を選択すると、保存済みのプリント履歴が表示されます。</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- スマホ用ボトムタブバー（sm以上では非表示） -->
+  <nav class="sm:hidden fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur border-t border-slate-200 flex pt-1 pb-[max(env(safe-area-inset-bottom),10px)]" role="tablist" aria-label="メインメニュー">
+    <button type="button" data-tab="tab-prompt" class="tab-btn-bottom relative flex-1 flex flex-col items-center gap-1 py-2.5 text-slate-900 font-semibold transition-colors">
+      <span id="pendingDot" class="hidden absolute top-1.5 right-[28%] w-2 h-2 rounded-full bg-amber-500 ring-2 ring-white"></span>
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="w-5 h-5">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+      </svg>
+      <span class="text-[10px]">作成</span>
+    </button>
+    <button type="button" data-tab="tab-preview" class="tab-btn-bottom flex-1 flex flex-col items-center gap-1 py-2.5 text-slate-400 transition-colors">
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="w-5 h-5">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M6.72 13.829c-.24.03-.48.062-.72.096m.72-.096a42.415 42.415 0 0110.56 0m-10.56 0L6.34 18m10.94-4.171c.24.03.48.062.72.096m-.72-.096L17.66 18m0 0l.229 2.523a1.125 1.125 0 01-1.12 1.227H7.231c-.662 0-1.18-.568-1.12-1.227L6.34 18m11.318 0h1.091A2.25 2.25 0 0021 15.75V9.456c0-1.081-.768-2.015-1.837-2.175a48.055 48.055 0 00-1.913-.247M6.34 18H5.25A2.25 2.25 0 013 15.75V9.456c0-1.081.768-2.015 1.837-2.175a48.041 48.041 0 011.913-.247m10.5 0a48.536 48.536 0 00-10.5 0m10.5 0V3.375c0-.621-.504-1.125-1.125-1.125h-8.25c-.621 0-1.125.504-1.125 1.125v3.659M18 10.5h.008v.008H18V10.5z" />
+      </svg>
+      <span class="text-[10px]">印刷</span>
+    </button>
+    <button type="button" data-tab="tab-manage" class="tab-btn-bottom flex-1 flex flex-col items-center gap-1 py-2.5 text-slate-400 transition-colors">
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="w-5 h-5">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25z" />
+      </svg>
+      <span class="text-[10px]">管理</span>
+    </button>
+    <button type="button" data-tab="tab-history" class="tab-btn-bottom flex-1 flex flex-col items-center gap-1 py-2.5 text-slate-400 transition-colors">
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="w-5 h-5">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+      <span class="text-[10px]">履歴</span>
+    </button>
+  </nav>
+
+  <!-- トースト -->
+  <div id="toast" role="status" aria-live="polite"
+    class="fixed bottom-24 sm:bottom-5 left-1/2 -translate-x-1/2 z-50 opacity-0 pointer-events-none translate-y-2 rounded-full bg-slate-900 text-white text-sm px-5 py-2.5 shadow-lg"></div>
+
+  <script>
+    /* ================================
+       状態管理
+    ================================ */
+    var students = [];
+    var currentLogs = [];
+    var toastTimer = null;
+    var pendingGeneratedStudentId = ''; // 次にAI出力をプレビュー更新するときに紐づける生徒
+    var previewStudentId = '';          // 現在プレビュー中のプリントに紐づく生徒。選択変更とは独立して保持する
+
+    /* ================================
+       ユーティリティ
+    ================================ */
+    function $(id) { return document.getElementById(id); }
+
+    function showToast(message, isError) {
+      var t = $('toast');
+      t.textContent = message;
+      t.className = t.className.replace(/bg-slate-900|bg-red-600/g, '').trim()
+        + ' ' + (isError ? 'bg-red-600' : 'bg-slate-900');
+      t.classList.remove('opacity-0', 'translate-y-2');
+      if (toastTimer) clearTimeout(toastTimer);
+      toastTimer = setTimeout(function () {
+        t.classList.add('opacity-0', 'translate-y-2');
+      }, 2600);
+    }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    function runServer(fnName, args, onSuccess, onFailure) {
+      if (typeof google === 'undefined' || !google.script) {
+        showToast('GAS環境外のためサーバー通信はできません', true);
+        if (onFailure) onFailure(new Error('not in GAS'));
+        return;
+      }
+      var runner = google.script.run
+        .withSuccessHandler(function (res) { onSuccess(res); })
+        .withFailureHandler(function (err) {
+          showToast('エラー: ' + (err && err.message ? err.message : '通信に失敗しました'), true);
+          if (onFailure) onFailure(err);
+        });
+      runner[fnName].apply(runner, args || []);
+    }
+
+    function setBusy(btnId, labelId, busyText, isBusy, normalText) {
+      var btn = $(btnId);
+      btn.disabled = isBusy;
+      if (labelId) $(labelId).textContent = isBusy ? busyText : normalText;
+    }
+
+    /* ================================
+       タブ切替（PC: ピル型メニュー / スマホ: ボトムバー）
+    ================================ */
+    var tabButtons = document.querySelectorAll('.tab-btn');
+    var bottomTabButtons = document.querySelectorAll('.tab-btn-bottom');
+    function activateTab(tabId) {
+      tabButtons.forEach(function (b) {
+        var active = (b.dataset.tab === tabId);
+        b.setAttribute('aria-selected', active ? 'true' : 'false');
+        b.classList.toggle('bg-white', active);
+        b.classList.toggle('text-slate-900', active);
+        b.classList.toggle('shadow-sm', active);
+        b.classList.toggle('text-slate-600', !active);
+      });
+      bottomTabButtons.forEach(function (b) {
+        var active = (b.dataset.tab === tabId);
+        b.setAttribute('aria-selected', active ? 'true' : 'false');
+        b.classList.toggle('text-slate-900', active);
+        b.classList.toggle('font-semibold', active);
+        b.classList.toggle('text-slate-400', !active);
+      });
+      document.querySelectorAll('.tab-panel').forEach(function (p) {
+        p.classList.toggle('active', p.id === tabId);
+      });
+    }
+    tabButtons.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        activateTab(btn.dataset.tab);
+      });
+    });
+    bottomTabButtons.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        activateTab(btn.dataset.tab);
+      });
+    });
+
+    /* グローバル生徒選択: 変更すると全タブの表示が切り替わる */
+    $('globalStudentSelect').addEventListener('change', function () {
+      onGlobalStudentChange();
+      var s = findStudent(currentStudentId());
+      if (s) showToast(s.display_name + ' に切り替えました');
+    });
+
+    /* ================================
+       生徒データの読み込み・セレクト反映
+    ================================ */
+    function loadStudents(preserveSelection) {
+      var prevGlobal = $('globalStudentSelect').value;
+
+      runServer('getStudents', [], function (json) {
+        students = JSON.parse(json);
+        fillSelect('globalStudentSelect', '生徒を選択', preserveSelection ? prevGlobal : '');
+        // 生徒名の解決に生徒データが必要なため、取得後に未処理チェックを読み込む
+        loadPendingChecks();
+        onGlobalStudentChange();
+      });
+    }
+
+    /* 現在選択中の生徒ID（全タブ共通） */
+    function currentStudentId() {
+      return $('globalStudentSelect').value;
+    }
+
+    /* グローバル選択が変わったときに、各タブの表示をまとめて更新する */
+    function onGlobalStudentChange() {
+      var id = currentStudentId();
+      // 管理タブ: ログとメモ
+      if (!id) {
+        $('addLogWrap').classList.add('hidden');
+        $('focusCard').classList.add('hidden');
+        $('logFilters').classList.add('hidden');
+        $('logList').innerHTML = emptyState('生徒を選ぶと、学習ログが表示されます');
+        $('historyList').innerHTML = emptyState('生徒を選ぶと、保存したプリントが表示されます');
+        currentLogs = [];
+        clearStudentForm();
+        return;
+      }
+      $('addLogWrap').classList.remove('hidden');
+      renderFocusCard(id);
+      loadKarteForm(id);
+      loadLogs(id);
+      loadHistoryList(id);
+    }
+
+    /* 選択中の生徒のカルテをフォームに読み込む（グローバル選択に追従） */
+    function loadKarteForm(id) {
+      var s = findStudent(id);
+      if (!s) { clearStudentForm(); return; }
+      $('fId').value = s.id;
+      $('fName').value = s.display_name;
+      $('fGrade').value = s.grade;
+      $('fLevel').value = s.learning_level;
+      $('fShortGoal').value = s.short_term_goal;
+      $('fGoal').value = s.goal;
+      $('fEnvironment').value = s.environment;
+      $('fPersonality').value = s.personality;
+      $('karteTarget').textContent = s.display_name + ' のカルテを編集中';
+      $('saveStudentBtnLabel').textContent = 'カルテを更新';
+    }
+
+    /* 空状態の共通表示 */
+    function emptyState(text) {
+      return '<div class="rounded-xl border border-dashed border-slate-300 bg-slate-50/60 px-4 py-8 text-center">'
+        + '<p class="text-sm text-slate-400">' + escapeHtml(text) + '</p></div>';
+    }
+
+    function fillSelect(selectId, placeholder, keepValue) {
+      var sel = $(selectId);
+      sel.innerHTML = '';
+      var ph = document.createElement('option');
+      ph.value = '';
+      ph.textContent = placeholder;
+      sel.appendChild(ph);
+      students.forEach(function (s) {
+        var opt = document.createElement('option');
+        opt.value = s.id;
+        opt.textContent = s.display_name + (s.grade ? '（' + s.grade + '）' : '');
+        sel.appendChild(opt);
+      });
+      if (keepValue) sel.value = keepValue;
+    }
+
+    function findStudent(id) {
+      for (var i = 0; i < students.length; i++) {
+        if (String(students[i].id) === String(id)) return students[i];
+      }
+      return null;
+    }
+
+    /* ================================
+       タブ1: プロンプト生成
+    ================================ */
+    function buildPrompt(student, weakItems, doneItems, mode, questionCount, sheetTitle, topic, secs) {
+      var weakBlock = weakItems.length > 0
+        ? weakItems.map(function (item) { return '・' + item; }).join('\n')
+        : '特になし';
+
+      var doneBlock = doneItems.length > 0
+        ? doneItems.map(function (item) { return '・' + item; }).join('\n')
+        : '特になし';
+
+      // 生徒用ページの本文構成（モードによる分岐）
+      var modeBlock;
+      if (mode === 'A') {
+        var withReview = !secs || secs.review !== false;
+        var withCheck  = !secs || secs.check  !== false;
+        var aLines = ['【今回のプリントの構成】以下のセクションを、この順序で固定構成とする。（下記の「・」は指示の箇条書きであり、実際の見出し番号ではない。見出し番号はws-numのルールに従うこと）'];
+        aLines.push('・解説文・要点まとめのセクションは設けないこと（解説は講師が口頭で行うため）。生徒用ページには文法の説明文を書かず、問題と単語表のみを載せる。');
+        if (withReview) {
+          aLines.push('・前回の復習: 「過去の未定着項目」から1〜2問を出題する。今回の教材内容と無関係でもよい。未定着項目が「特になし」の場合はこのセクション自体を省略する。ここは定着したかどうかを見極めるための設問なので、前回と同じ形をなぞるのではなく、その項目が本当に使えるかを測れる問題にすること。具体的には、同じ知識を別の文脈・別の出題形式で問う、または混同しやすい隣接文法と並べて判別させる（例: 仮定法過去完了が未定着なら、仮定法過去と並べて時制を選ばせる／単なる過去形との違いを問う）。表面的な暗記では正解できず、理解していれば正解できる問題を目指すこと。');
+        }
+        aLines.push('・重要単語: 後述の表形式で出力すること。');
+        if (withCheck) {
+          aLines.push('・確認問題: 教材の英文をそのまま設問に流用するのではなく、今回の教材から読み取れる文法事項・語彙が実際に使えるかを測る問題を新しく作成すること。教材はあくまで出題内容を判断するための素材として扱い、設問には生徒の「学習度合」に合わせて語彙と文構造を調整した自作の英文を用いること。設問のうち1〜2問は、未定着項目とその周辺文法を組み合わせて判別させる問題にすること（例: 関係代名詞と接続詞thatが混在した選択問題、複数の用法から正しいものを選ばせる問題）。文法は体系の中でつながっているため、単独の知識を問うだけでなく、似た形の中から見分けられるかを測ることを重視する。出題形式は、下線部の働きの説明・語形変化・並べかえ・空所補充・部分訳など、問うポイントを絞った形式とし、英文を一文まるごと日本語訳させる問題は避けること。');
+        }
+        aLines.push('・講師用ページの定着度チェックリストは3〜5件に厳選し、短期目標の達成に直結するものを優先すること。');
+        modeBlock = aLines.join('\n');
+      } else if (mode === 'C') {
+        modeBlock = [
+          '【今回のプリントの構成】未定着の単語を克服するための単語テストを作成する。以下を厳守すること。',
+          '・出題する単語の決め方: 「出題の題材」に単語が具体的に指定されている場合は、その単語を最優先で全て出題すること。指定がない場合は「過去の未定着項目」のうち「単語: 」で始まる項目から出題する。教材の画像やテキストが添付されている場合は、そこに含まれる重要語も加えてよい。',
+          '・解説・要点まとめ・単語一覧表・空所補充は含めず、単語の意味を答えるセクション1つのみの構成とする。',
+          '・見出しは「単語の意味」とし、冒頭に指示文「次の英単語の日本語の意味を答えなさい。」を置き、英単語を1問ずつ出題する。設問番号は1から振ること。',
+          '・設問が短いため、合計が10問以上になる場合は <ol class="ws-list ws-2col"> を使って2列で出力し、紙面を節約すること。10問未満なら通常どおり <ol class="ws-list"> とする。',
+          '・（⇒要点N）の戻り先表記は付けないこと。',
+          '・講師用ページの定着度チェックリストには、このテストで出題した単語を1語も省略せず全て列挙すること。出題数が20語ならチェックリストも20件になる。件数の上限はなく、「厳選」もしないこと（授業後にどの単語を落としたか記録するために全語が必要なため）。形式は <li class="log-item" data-log="単語: 英単語">英単語</li> とすること。'
+        ].join('\n');
+      }
+
+      // コア・ルール 1〜7 は既存文言のまま固定。8・9は状況に応じて動的に追記する。
+      var coreRules = [
+        '上記の「カルテ情報」と「過去の未定着項目」を最大限に反映させたコンテンツを作成してください。',
+        '1. 未定着項目の克服: 教材の中に「未定着項目」に関連する要素があれば、必ず復習用の解説や確認問題に盛り込み、重点的に出題してください。',
+        '2. 設問の番号形式: 確認問題や演習問題の番号は「問1」「問2」などの表記は使わず、「1. 」「2. 」のようにシンプルにしてください。',
+        '3. 不要な情報の排除: 生徒のカルテ情報（目標・環境・性格など）をプリント上に書き出さないでください。見出しの後は余計な情報を挟まず、すぐに本文に入ってください。',
+        '4. 見出しのシンプル化: 「2. 必修語彙 ＆ 得点アップの近道」のような装飾的な見出しは避け、「2. 必修語彙」のように極力シンプルにしてください。',
+        '5. コメントの排除: 生徒用ページの各大問・小問の下に、生徒への一言コメントや励ましのメッセージ等は一切出力しないでください。',
+        '6. トーン＆マナー: 解説等の文末は必ず「〜だ」「〜である」などの言い切り型（常体）に統一してください。「〜しましょう」「〜ですね」などの表現は使用しないでください。'
+      ];
+
+      var nextRuleNumber = 7;
+      if (questionCount) {
+        coreRules.push(nextRuleNumber + '. 問題数の目安: 確認問題・演習問題は合計' + questionCount + 'としてください。');
+        nextRuleNumber++;
+      }
+      coreRules.push(nextRuleNumber + '. 定着済み項目の扱い: 「すでに定着済みの項目」と実質的に同じ内容を、確認問題・演習問題・定着度チェックリスト・重要単語の表に再掲しないでください。');
+
+      // 生徒用ページの雛形（出典の有無でws-metaの行を出し分ける）
+      var studentTemplateLines = ['<div class="student-page ws-page">', '  <div class="ws-title">',
+        (sheetTitle ? '    <h1>' + sheetTitle + '</h1>' : '    <h1>プリントの題名（内容に合わせてシンプルに付ける）</h1>')];
+      studentTemplateLines.push(
+        '  </div>',
+        '  （以下、本文セクション）',
+        '</div>'
+      );
+
+      // 出力フォーマットブロック（要件3で全面置換した部分）
+      var outputFormatBlock = [
+        '■ 出力フォーマット（厳守）',
+        'デザインはアプリ側のCSSで統一されている。以下を厳守してHTMLの構造のみを出力すること。',
+        '・使用できるクラスは ws- で始まるクラス、student-page、teacher-page、log-item のみ。',
+        '・style属性、色の指定、Tailwindクラス、その他の装飾クラスは一切使用禁止。',
+        '・[cite: 1] のような引用マーカーや出典の注釈記号を本文に含めないこと。',
+
+        '',
+        '【生徒用ページの雛形】'
+      ].concat(studentTemplateLines).concat([
+        '',
+        '【生徒用ページの本文構成】',
+        '大見出しは <div class="ws-section"><span class="ws-num">番号</span>見出し</div> を使用すること。ws-num内の番号はピリオドを付けず数字のみとすること（例: 1、2。「1.」「2.」としない）。これは設問の番号形式（ルール3）とは別の表記であり、混同しないこと。',
+        modeBlock,
+        ''
+      ]).concat(mode === 'A' ? [
+        '【重要単語の表形式】',
+        '<table class="ws-vocab">',
+        '  <thead><tr><th class="ws-word">単語</th><th class="ws-pos">品詞</th><th>意味</th><th class="ws-memo">メモ</th></tr></thead>',
+        '  <tbody><tr><td class="ws-word" data-log="単語: 英単語">単語</td><td class="ws-pos">動</td><td>意味</td><td class="ws-memo">メモ欄</td></tr></tbody>',
+        '</table>',
+        '・単語表の各行の <td class="ws-word"> には、必ず data-log="単語: 英単語" 属性を付けること（例: data-log="単語: prove"）。印刷後に学習ログへ取り込むために使用する。',
+        '・品詞は「動」「名」「形」「副」「前」「接」「熟」の略記で書くこと。',
+        '・単語は4〜6語とすること。メモ欄の内容はこの生徒のカルテと未定着項目に合わせて自由に選んでよい（ひっかけ・混同しやすい語・類義語・対義語・語源など）。語源は確実な場合のみ記載すること。書くべきことがなければ空欄でよい。',
+        ''
+      ] : []).concat([
+        '【共通の部品】',
+        '・英文は <p class="ws-en"> 、記述式の解答欄は <div class="ws-write"></div> を使用すること（解答欄は想定される解答の長さに応じて1〜3個）。',
+        '・箇条書きは <ul class="ws-list"> または <ol class="ws-list"> を使用すること。',
+        '',
+        '【講師用ページの雛形】',
+        '<div class="teacher-page ws-page">',
+        '  <div class="ws-title"><h1>生徒用ページと同じタイトル</h1></div>',
+        '  <div class="ws-t-h">解答・解説</div>',
+        (mode === 'C'
+          ? '  （全設問の解答。単語テストのため解説は不要。設問が短いので <ol class="ws-list ws-2col"> で2列にすること）'
+          : '  （前回の復習を含む、生徒用ページの全設問の解答解説。簡潔なリスト形式）'),
+        '  <div class="ws-t-h">本日の定着度チェックリスト</div>',
+        (mode === 'C'
+          ? '  <ul class="ws-check ws-2col">'
+          : '  <ul class="ws-check">'),
+        '    <li class="log-item" data-log="項目名">項目名</li>',
+        '  </ul>',
+        '</div>',
+        '・講師用ページは上記の2構成のみとし、指導アドバイスや声かけスクリプト等の他のセクションは出力しないこと。装飾を加えず、簡潔なリスト中心の事務的な内容にすること。',
+        (mode === 'C'
+          ? '・チェックリストの各項目は、必ず <li class="log-item" data-log="単語: 英単語">英単語</li> の形式で出力すること。件数は上記のモード別の指示に従うこと。'
+          : '・チェックリストの各項目は、必ず <li class="log-item" data-log="項目名"> の形式で出力すること。data-log属性には、学習ログにそのまま記録できる具体的で簡潔な項目名（文法事項・語彙・技能のいずれかの観点で15文字程度。例: 仮定法過去完了の形、不定詞と動名詞の使い分け、関係代名詞whoseの用法）を入れること。チェックリストの件数は、上記のモード別の指示に従うこと。')
+      ]);
+
+      if (sheetTitle) {
+        outputFormatBlock.push('・プリントの題名は「' + sheetTitle + '」をそのまま使用すること。');
+      }
+
+      // モデルはプロンプト末尾の指示に最も強く従うため、応答形式の指定は最後に置く。
+      // 禁止形の強い命令はGeminiの定型拒否(「まだ学習中です」)を誘発するため、理由付きの依頼形にする
+      outputFormatBlock.push(
+        '',
+        '■ 応答形式',
+        'あなたの出力は、そのまま印刷アプリに貼り付けて利用されます。挨拶・前置き・説明の文章は不要です。HTMLをコードブロックで出力してください（コピーしやすくするためです。アプリ側でコードブロックの記号は自動的に除去されます）。'
+      );
+
+      // 上から順に組み立てる（条件つきのセクションは if で足す）
+      var lines = [
+        'あなたは個別指導塾の優秀な教務アシスタントです。添付する教材の画像（またはテキスト）を分析し、指定フォーマットのHTMLを出力してください。',
+        '教材は「この生徒に今どの文法事項・語彙を扱うべきか」を判断するための素材です。教材の問題文・解説・例文をそのまま書き写したプリントを作るのではなく、そこから読み取った学習内容をもとに、この生徒に合わせた問題を新しく作成してください。',
+        '',
+        '■ 対象生徒のカルテ情報',
+        '・学習度合: ' + (student.learning_level || '未記入'),
+        '・短期目標: ' + (student.short_term_goal || '未記入'),
+        '・目標: ' + (student.goal || '未記入'),
+        '・環境: ' + (student.environment || '未記入'),
+        '・性格: ' + (student.personality || '未記入'),
+        ''
+      ];
+
+      if (student.teaching_policy) {
+        lines = lines.concat([
+          '■ この生徒への指導方針',
+          student.teaching_policy,
+          '（この方針を、プリントの構成・出題形式・分量・解説の詳しさに反映させること。カルテの他の情報と方針が食い違う場合は、この方針を優先すること）',
+          ''
+        ]);
+      }
+
+      lines = lines.concat([
+        '■ この生徒の過去の未定着項目（弱点）',
+        weakBlock,
+        '',
+        '■ すでに定着済みの項目',
+        doneBlock,
+        ''
+      ]);
+
+      if (topic) {
+        lines = lines.concat([
+          '■ 出題の題材',
+          topic,
+          '（教材の画像が添付されている場合は画像の内容を優先し、この題材は補足の指定として扱うこと。画像がない場合はこの題材に基づいて出題すること）',
+          ''
+        ]);
+      }
+
+      lines = lines
+        .concat(['【重要：プロンプト生成のコア・ルール】'])
+        .concat(coreRules)
+        .concat([''])
+        .concat(outputFormatBlock);
+
+      return lines.join('\n');
+    }
+
+    $('generateBtn').addEventListener('click', function () {
+      var studentId = currentStudentId();
+      if (!studentId) {
+        showToast('画面右上から生徒を選んでください', true);
+        return;
+      }
+      var student = findStudent(studentId);
+      if (!student) {
+        showToast('生徒データが見つかりません', true);
+        return;
+      }
+      var mode = document.querySelector('input[name="outputMode"]:checked').value;
+      // 現在のモードに応じた問題数指定を使用する
+      var questionCount = $('questionCountSelect').value;
+      var sheetTitle = $('sheetTitleInput').value.trim();
+      var topic = $('topicInput').value.trim();
+
+      setBusy('generateBtn', 'generateBtnLabel', '生成中...', true, 'プロンプト生成');
+      runServer('getLogs', [studentId], function (json) {
+        // 取得中に別の生徒へ切り替えた場合、古い生徒の結果で画面を上書きしない
+        if (String(currentStudentId()) !== String(studentId)) {
+          setBusy('generateBtn', 'generateBtnLabel', '', false, 'プロンプト生成');
+          return;
+        }
+        var logs = JSON.parse(json);
+        // 項目名でグループ化: 1行でも未定着なら未定着として扱い、
+        // 複数回登録された項目には（累計N回）を付けてAIに優先度を伝える
+        var groups = groupLogs(logs);
+        var weakItems = groups
+          .filter(function (g) { return g.status === '未定着'; })
+          .map(function (g) { return g.count >= 2 ? g.item + '（累計' + g.count + '回）' : g.item; });
+        // すでに「定着」した項目（重複出題・チェックリスト再掲の防止に使用）
+        var doneItems = groups
+          .filter(function (g) { return g.status === '定着'; })
+          .map(function (g) { return g.item; });
+
+        var prompt = buildPrompt(student, weakItems, doneItems, mode, questionCount, sheetTitle, topic, sections);
+        $('promptOutput').value = prompt;
+        $('promptCharCount').textContent = prompt.length + ' 文字';
+        $('promptResultWrap').classList.remove('hidden');
+        pendingGeneratedStudentId = studentId;
+        setBusy('generateBtn', 'generateBtnLabel', '', false, 'プロンプト生成');
+        if (mode === 'C') {
+          var weakWordCount = groups.filter(function (g) { return g.status === '未定着' && isWordLog(g.item); }).length;
+          showToast(weakWordCount > 0
+            ? 'プロンプトを生成しました（未定着の単語 ' + weakWordCount + ' 件を反映）'
+            : 'プロンプトを生成しました（未定着の単語が0件のため、教材・題材からの出題が中心になります）');
+        } else {
+          showToast('プロンプトを生成しました（未定着項目 ' + weakItems.length + ' 件を反映）');
+        }
+      }, function () {
+        setBusy('generateBtn', 'generateBtnLabel', '', false, 'プロンプト生成');
+      });
+    });
+
+    /* タブ1: クリアボタン（結果のみ初期化。生徒選択・モード・問題数は維持） */
+    $('clearPromptBtn').addEventListener('click', function () {
+      $('promptOutput').value = '';
+      $('promptCharCount').textContent = '';
+      $('promptResultWrap').classList.add('hidden');
+      $('generateBtn').focus();
+      showToast('クリアしました');
+    });
+
+    /* タブ1: 生成後に印刷タブへ進む導線 */
+    $('goToPreviewBtn').addEventListener('click', function () {
+      // 生徒の紐づけは、実際にAI出力でプレビューを更新した時点で確定する
+      // （既存プレビューを誤って別生徒へ付け替えないため）
+      activateTab('tab-preview');
+      $('htmlInput').focus();
+    });
+
+    /* タブ1: モード連動の表示切替 */
+    /* タブ1: プリントに入れるセクションの選択（授業プリントのみ） */
+    var sections = { review: true, check: true };
+
+    function paintSectionBtn(btn, on) {
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      btn.classList.toggle('border-slate-800', on);
+      btn.classList.toggle('bg-white', on);
+      btn.classList.toggle('border-slate-200', !on);
+      btn.classList.toggle('bg-slate-50', !on);
+      btn.querySelector('.section-bar').classList.toggle('hidden', !on);
+      btn.querySelector('.section-check').classList.toggle('hidden', !on);
+      // オフのときは文字も薄くして、ひと目で無効と分かるようにする
+      btn.querySelector('.section-title').classList.toggle('text-slate-900', on);
+      btn.querySelector('.section-title').classList.toggle('text-slate-400', !on);
+      btn.querySelector('.section-desc').classList.toggle('text-slate-500', on);
+      btn.querySelector('.section-desc').classList.toggle('text-slate-300', !on);
+    }
+
+    Array.prototype.slice.call(document.querySelectorAll('.section-btn')).forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var key = btn.dataset.section;
+        // 両方オフだと単語表だけのプリントになってしまうため、最後の1つは外せない
+        var otherOn = Object.keys(sections).some(function (k) { return k !== key && sections[k]; });
+        if (sections[key] && !otherOn) {
+          showToast('どちらか一方は必要です', true);
+          return;
+        }
+        sections[key] = !sections[key];
+        paintSectionBtn(btn, sections[key]);
+      });
+    });
+
+    function syncModeVisibility() {
+      var mode = document.querySelector('input[name="outputMode"]:checked').value;
+      $('sectionWrap').classList.toggle('hidden', mode !== 'A');
+      // 題材欄のplaceholderと補足文をモードに合わせて切り替える
+      var topicEl = $('topicInput');
+      topicEl.placeholder = (mode === 'C') ? topicEl.dataset.placeholderC : topicEl.dataset.placeholderB;
+      $('topicHint').textContent = (mode === 'C')
+        ? '出したい単語をそのまま並べて指定できます。空欄なら未定着の単語から出題します。'
+        : '教材の写真を添付しない場合はここに出題内容を書きます。写真と併用も可能です。';
+
+      // 出題数の刻みをモードに合わせる
+      var sel = $('questionCountSelect');
+      var keep = sel.value;
+      var opts = (mode === 'C')
+        ? [['', 'おまかせ'], ['5問程度', '5問'], ['10問程度', '10問'], ['20問程度', '20問']]
+        : [['', 'おまかせ'], ['5問程度', '5問'], ['10問程度', '10問'], ['15問程度', '15問']];
+      sel.innerHTML = '';
+      opts.forEach(function (o) {
+        var el = document.createElement('option');
+        el.value = o[0];
+        el.textContent = o[1];
+        sel.appendChild(el);
+      });
+      sel.value = opts.some(function (o) { return o[0] === keep; }) ? keep : '';
+    }
+    document.querySelectorAll('input[name="outputMode"]').forEach(function (radio) {
+      radio.addEventListener('change', syncModeVisibility);
+    });
+    syncModeVisibility();
+
+    /* タブ3: カルテフォームの折りたたみ */
+    function setKarteFormOpen(open) {
+      $('karteFormBody').classList.toggle('hidden', !open);
+      $('toggleKarteBtn').setAttribute('aria-expanded', open ? 'true' : 'false');
+      $('karteChevron').style.transform = open ? 'rotate(90deg)' : '';
+    }
+    $('toggleKarteBtn').addEventListener('click', function () {
+      setKarteFormOpen($('karteFormBody').classList.contains('hidden'));
+    });
+
+    $('copyBtn').addEventListener('click', function () {
+      var text = $('promptOutput').value;
+      if (!text) return;
+      function done() {
+        $('copyBtnLabel').textContent = 'コピーしました';
+        showToast('クリップボードにコピーしました');
+        setTimeout(function () { $('copyBtnLabel').textContent = 'コピー'; }, 2000);
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done).catch(function () { fallbackCopy(text, done); });
+      } else {
+        fallbackCopy(text, done);
+      }
+    });
+
+    function fallbackCopy(text, done) {
+      var ta = $('promptOutput');
+      ta.focus();
+      ta.select();
+      try {
+        document.execCommand('copy');
+        done();
+      } catch (e) {
+        showToast('コピーに失敗しました。手動で選択してください', true);
+      }
+      window.getSelection().removeAllRanges();
+    }
+
+    /* ================================
+       タブ2: 印刷プレビュー
+    ================================ */
+    var PREVIEW_PLACEHOLDER = '<p class="text-sm text-slate-400">HTMLを貼り付けて「プレビュー更新」を押すと、ここに表示されます。</p>';
+
+    /* タブ2: クリップボードから貼り付け（スマホでの長押し操作を省く） */
+    $('pasteHtmlBtn').addEventListener('click', function () {
+      if (!navigator.clipboard || !navigator.clipboard.readText) {
+        showToast('この環境では自動貼り付けができません。長押しで貼り付けてください', true);
+        $('htmlInput').focus();
+        return;
+      }
+      navigator.clipboard.readText().then(function (text) {
+        if (!text || !text.trim()) {
+          showToast('クリップボードが空です', true);
+          return;
+        }
+        $('htmlInput').value = text;
+        showToast('貼り付けました。「更新」を押してください');
+      }).catch(function () {
+        // 権限が拒否された場合など
+        showToast('自動貼り付けができません。長押しで貼り付けてください', true);
+        $('htmlInput').focus();
+      });
+    });
+
+    $('updatePreviewBtn').addEventListener('click', function () {
+      var html = $('htmlInput').value.trim();
+      if (!html) {
+        $('previewArea').innerHTML = PREVIEW_PLACEHOLDER;
+        hideDetectedLogPanel();
+        showToast('HTMLが入力されていません', true);
+        return;
+      }
+      // 直前に生成したプロンプトへのAI出力なら、その生成対象の生徒へ紐づける。
+      // 直接貼り付けの場合は、まだ紐づきがなければ現在選択中の生徒を使う。
+      if (pendingGeneratedStudentId) {
+        previewStudentId = pendingGeneratedStudentId;
+        pendingGeneratedStudentId = '';
+      } else if (!previewStudentId) {
+        previewStudentId = currentStudentId();
+      }
+      // 誤って含まれたMarkdownコードフェンスを除去
+      html = html.replace(/^```(?:html)?\s*/i, '').replace(/```\s*$/, '');
+      // Gemini等が付ける引用マーカー（[cite: 1], [cite_start]など）を除去
+      html = html.replace(/\[cite_start\]|\[cite_end\]|\[cite:\s*\d+(?:,\s*\d+)*\]/gi, '');
+      // 前置きの挨拶文などが混ざっていても、HTML本体（student-page開始〜最後の</div>）だけを抽出する
+      var startIdx = html.indexOf('<div class="student-page');
+      if (startIdx > 0) {
+        html = html.substring(startIdx);
+      }
+      var endIdx = html.lastIndexOf('</div>');
+      if (endIdx !== -1) {
+        html = html.substring(0, endIdx + 6);
+      }
+      $('previewArea').innerHTML = html;
+      sanitizePreviewHtml();
+      detectLogItems();
+      showHistorySavePanel();
+      $('previewArea').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      showToast('プレビューを更新しました');
+    });
+
+    $('printBtn').addEventListener('click', function () {
+      var content = $('previewArea').innerHTML.trim();
+      if (!content || content.indexOf('ここに表示されます') !== -1) {
+        showToast('先にプレビューを更新してください', true);
+        return;
+      }
+      window.print();
+    });
+
+    /* タブ2: クリアボタン（入力・プレビュー・検出パネル・履歴保存パネルをすべて初期化） */
+    $('clearPreviewBtn').addEventListener('click', function () {
+      $('htmlInput').value = '';
+      $('previewArea').innerHTML = PREVIEW_PLACEHOLDER;
+      hideDetectedLogPanel();
+      $('historySavePanel').classList.add('hidden');
+      previewStudentId = '';
+      pendingGeneratedStudentId = '';
+      showToast('クリアしました');
+    });
+
+    /* ---- 出力履歴: 保存（タブ2） ---- */
+
+    function showHistorySavePanel() {
+      $('historySavePanel').classList.remove('hidden');
+    }
+
+    $('saveHistoryBtn').addEventListener('click', function () {
+      var content = $('previewArea').innerHTML.trim();
+      if (!content || content.indexOf('ここに表示されます') !== -1) {
+        showToast('先にプレビューを更新してください', true);
+        return;
+      }
+      var studentId = previewStudentId || currentStudentId();
+      if (!studentId) {
+        showToast('このプリントに紐づく生徒がありません。画面右上から生徒を選んで、プレビューを更新してください', true);
+        return;
+      }
+      // 題名はプレビューのDOMから自動抽出（出典欄は廃止したが、過去の履歴との互換で読めるなら読む）
+      var titleEl = $('previewArea').querySelector('.ws-title h1');
+      var sourceEl = $('previewArea').querySelector('.ws-source');
+      var title = titleEl ? titleEl.textContent.trim() : '無題プリント';
+      var source = sourceEl ? sourceEl.textContent.trim() : '';
+
+      // このプリントのチェック項目を一緒に預ける。
+      // 授業後に「あとで記録」から、まとめて学習ログに登録できる
+      var checkItems = [];
+      $('previewArea').querySelectorAll('[data-log]').forEach(function (n) {
+        var t = String(n.getAttribute('data-log') || '').trim();
+        if (t && checkItems.indexOf(t) === -1) checkItems.push(t);
+      });
+
+      setBusy('saveHistoryBtn', 'saveHistoryBtnLabel', '保存中...', true, '授業で使う');
+      runServer('saveHistory', [studentId, title, source, content, checkItems], function () {
+        setBusy('saveHistoryBtn', 'saveHistoryBtnLabel', '', false, '授業で使う');
+        showToast(checkItems.length > 0
+          ? '保存しました。授業後に「あとで記録」から登録できます'
+          : '保存しました');
+        $('historySavePanel').classList.add('hidden');
+        if (currentStudentId() === studentId) {
+          loadHistoryList(studentId);
+        }
+        loadPendingChecks();
+      }, function () {
+        setBusy('saveHistoryBtn', 'saveHistoryBtnLabel', '', false, '授業で使う');
+      });
+    });
+
+    /* ---- 出力履歴: 一覧・読み込み（タブ4） ---- */
+
+
+    function loadHistoryList(studentId) {
+      if (String(currentStudentId()) !== String(studentId)) return;
+      $('historyList').innerHTML = emptyState('読み込み中...');
+      runServer('getHistoryList', [studentId], function (json) {
+        // 取得中に生徒が切り替わった場合は古い一覧を描画しない
+        if (String(currentStudentId()) !== String(studentId)) return;
+        var list = JSON.parse(json);
+        if (list.length === 0) {
+          $('historyList').innerHTML = emptyState('まだ保存したプリントがありません');
+          return;
+        }
+        $('historyList').innerHTML = list.map(function (h) {
+          return ''
+            + '<div class="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">'
+            +   '<div class="w-full sm:w-auto sm:flex-1 min-w-0">'
+            +     '<p class="text-sm font-medium text-slate-800 break-words [overflow-wrap:anywhere]">' + escapeHtml(h.title) + '</p>'
+            +     '<p class="text-xs text-slate-400 mt-0.5">' + escapeHtml(h.date)
+            +       (h.source ? ' ・ ' + escapeHtml(h.source) : '') + '</p>'
+            +   '</div>'
+            +   '<div class="flex items-center gap-2 ml-auto">'
+            +   '<button type="button" data-history-id="' + escapeHtml(h.id) + '"'
+            +     ' class="load-history-btn shrink-0 whitespace-nowrap rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-400 transition-colors">'
+            +     'プレビューに読み込む'
+            +   '</button>'
+            +   '<button type="button" data-history-id="' + escapeHtml(h.id) + '"'
+            +     ' class="delete-history-btn shrink-0 rounded-lg border border-slate-300 bg-white p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 hover:border-red-200 focus:outline-none focus:ring-2 focus:ring-red-300 transition-colors" aria-label="この履歴を削除">'
+            +     '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="w-4 h-4">'
+            +       '<path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />'
+            +     '</svg>'
+            +   '</button>'
+            +   '</div>'
+            + '</div>';
+        }).join('');
+
+        $('historyList').querySelectorAll('.load-history-btn').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            btn.disabled = true;
+            btn.textContent = '読み込み中...';
+            runServer('getHistoryHtml', [btn.dataset.historyId], function (json) {
+              var res = JSON.parse(json);
+              previewStudentId = studentId;
+              pendingGeneratedStudentId = '';
+              $('htmlInput').value = res.html;
+              $('previewArea').innerHTML = res.html;
+              sanitizePreviewHtml();
+              detectLogItems();
+              // 再印刷して授業で使う場合もあるため、保存パネルは表示したままにする
+              showHistorySavePanel();
+              activateTab('tab-preview');
+              btn.disabled = false;
+              btn.textContent = 'プレビューに読み込む';
+              showToast('プレビューに読み込みました。そのまま印刷できます');
+            }, function () {
+              btn.disabled = false;
+              btn.textContent = 'プレビューに読み込む';
+            });
+          });
+        });
+
+        $('historyList').querySelectorAll('.delete-history-btn').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            if (!window.confirm('この履歴を削除しますか？ この操作は取り消せません。')) return;
+            var studentId = currentStudentId();
+            btn.disabled = true;
+            runServer('deleteHistory', [btn.dataset.historyId], function () {
+              showToast('履歴を削除しました');
+              loadHistoryList(studentId);
+            }, function () {
+              btn.disabled = false;
+            });
+          });
+        });
+      });
+    }
+
+    /* ---- 印刷デザインの固定化を守るためのサニタイズ処理 ----
+       AIが指示に反してstyle属性や許可外のクラスを混入させた場合の防御。
+       ws- で始まるクラス、student-page、teacher-page、log-item 以外は除去する。 */
+    function sanitizePreviewHtml() {
+      var allowedExact = { 'student-page': true, 'teacher-page': true, 'log-item': true };
+      // 危険要素の除去（AIのハルシネーションや悪意ある貼り付けへの防御）
+      $('previewArea').querySelectorAll('script, iframe, object, embed, link, meta').forEach(function (el) {
+        el.remove();
+      });
+      var nodes = $('previewArea').querySelectorAll('*');
+      nodes.forEach(function (node) {
+        // on*イベント属性とjavascript:スキームの除去
+        Array.prototype.slice.call(node.attributes).forEach(function (attr) {
+          var an = attr.name.toLowerCase();
+          if (an.indexOf('on') === 0) {
+            node.removeAttribute(attr.name);
+          } else if ((an === 'href' || an === 'src') && String(attr.value).trim().toLowerCase().indexOf('javascript:') === 0) {
+            node.removeAttribute(attr.name);
+          }
+        });
+        if (node.hasAttribute('style')) {
+          node.removeAttribute('style');
+        }
+        if (node.classList && node.classList.length > 0) {
+          var toRemove = [];
+          node.classList.forEach(function (cls) {
+            var isAllowed = cls.indexOf('ws-') === 0 || allowedExact[cls] === true;
+            if (!isAllowed) toRemove.push(cls);
+          });
+          toRemove.forEach(function (cls) { node.classList.remove(cls); });
+        }
+      });
+    }
+
+    /* ---- チェックリストからの学習ログ自動検出・一括登録 ---- */
+
+    function hideDetectedLogPanel() {
+      $('detectedLogPanel').classList.add('hidden');
+      $('detectedLogItems').innerHTML = '';
+      $('detectedLogCount').textContent = '';
+    }
+
+    function detectLogItems() {
+      var nodes = $('previewArea').querySelectorAll('[data-log]');
+      var items = [];
+      nodes.forEach(function (node) {
+        var text = String(node.getAttribute('data-log') || '').trim();
+        if (text && items.indexOf(text) === -1) items.push(text);
+      });
+
+      if (items.length === 0) {
+        hideDetectedLogPanel();
+        return;
+      }
+
+      $('detectedLogCount').textContent = items.length + ' 件検出';
+      $('detectedLogItems').innerHTML = items.map(function (item, i) {
+        // 初期状態はすべて未チェック。授業前の時点では定着状況が分からないため、
+        // 講師が「できなかった」と判断した項目だけを選んで登録できるようにする
+        return ''
+          + '<label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm cursor-pointer has-[:checked]:border-slate-800 has-[:checked]:ring-1 has-[:checked]:ring-slate-800 transition-colors">'
+          +   '<input type="checkbox" data-item="' + escapeHtml(item) + '"'
+          +     ' class="detected-log-checkbox rounded border-slate-300 text-slate-800 focus:ring-slate-400">'
+          +   '<span class="text-slate-800">' + escapeHtml(item) + '</span>'
+          + '</label>';
+      }).join('');
+
+      $('detectedLogPanel').classList.remove('hidden');
+    }
+
+    $('registerDetectedLogsBtn').addEventListener('click', function () {
+      var studentId = previewStudentId || currentStudentId();
+      if (!studentId) {
+        showToast('このプリントに紐づく生徒がありません。画面右上から生徒を選んで、プレビューを更新してください', true);
+        return;
+      }
+      var checked = Array.prototype.slice.call(
+        $('detectedLogItems').querySelectorAll('.detected-log-checkbox:checked')
+      );
+      var items = checked.map(function (cb) { return cb.dataset.item; });
+      if (items.length === 0) {
+        showToast('追加する項目を選択してください', true);
+        return;
+      }
+
+      setBusy('registerDetectedLogsBtn', 'registerDetectedLogsBtnLabel', '登録中...', true, '選択した項目をログに追加');
+      runServer('saveLogsBulk', [studentId, items], function (json) {
+        var res = JSON.parse(json);
+        setBusy('registerDetectedLogsBtn', 'registerDetectedLogsBtnLabel', '', false, '選択した項目をログに追加');
+        showToast(res.count + '件の未定着項目を追加しました');
+        hideDetectedLogPanel();
+        // タブ3を開いている場合に備え、対象生徒のログ表示中なら更新する
+        if (currentStudentId() === studentId) {
+          loadLogs(studentId);
+        }
+      }, function () {
+        setBusy('registerDetectedLogsBtn', 'registerDetectedLogsBtnLabel', '', false, '選択した項目をログに追加');
+      });
+    });
+
+    /* ================================
+       タブ3: カルテ・ログ管理
+    ================================ */
+    function clearStudentForm() {
+      $('fId').value = '';
+      $('fName').value = '';
+      $('fGrade').value = '';
+      $('fLevel').value = '';
+      $('fShortGoal').value = '';
+      $('fGoal').value = '';
+      $('fEnvironment').value = '';
+      $('fPersonality').value = '';
+      $('karteTarget').textContent = '新しい生徒を登録します';
+      $('saveStudentBtnLabel').textContent = 'カルテを保存';
+    }
+
+    $('newStudentBtn').addEventListener('click', function () {
+      // グローバル選択も解除し、「今カルテに出ているのは新規の生徒」という
+      // 状態を画面全体で一致させる
+      $('globalStudentSelect').value = '';
+      onGlobalStudentChange();
+      setKarteFormOpen(true);
+      $('fName').focus();
+      showToast('新しい生徒を登録します');
+    });
+
+
+    $('saveStudentBtn').addEventListener('click', function () {
+      var name = $('fName').value.trim();
+      if (!name) {
+        showToast('管理名を入力してください', true);
+        $('fName').focus();
+        return;
+      }
+      var data = {
+        id: $('fId').value,
+        display_name: name,
+        grade: $('fGrade').value.trim(),
+        learning_level: $('fLevel').value.trim(),
+        short_term_goal: $('fShortGoal').value.trim(),
+        goal: $('fGoal').value.trim(),
+        environment: $('fEnvironment').value.trim(),
+        personality: $('fPersonality').value.trim(),
+        // 指導方針と授業メモは「今この子について」カードで編集するため、
+        // カルテ保存では既存値を引き継ぐ（新規登録時は空で作成）
+        teaching_policy: ($('fId').value && findStudent($('fId').value)) ? (findStudent($('fId').value).teaching_policy || '') : '',
+        memo: ($('fId').value && findStudent($('fId').value)) ? (findStudent($('fId').value).memo || '') : ''
+      };
+      setBusy('saveStudentBtn', 'saveStudentBtnLabel', '保存中...', true, 'カルテを保存');
+      runServer('saveStudent', [data], function (json) {
+        var res = JSON.parse(json);
+        setBusy('saveStudentBtn', 'saveStudentBtnLabel', '', false, 'カルテを保存');
+        showToast(res.mode === 'create' ? '生徒を登録しました' : 'カルテを更新しました');
+        // 新規登録した生徒は、そのまま選択状態にして続けて操作できるようにする
+        runServer('getStudents', [], function (j2) {
+          students = JSON.parse(j2);
+          fillSelect('globalStudentSelect', '生徒を選択', res.id);
+          onGlobalStudentChange();
+          loadPendingChecks();
+        });
+      }, function () {
+        setBusy('saveStudentBtn', 'saveStudentBtnLabel', '', false, 'カルテを保存');
+      });
+    });
+
+    /* ---- 学習ログ ---- */
+
+    /* ---- 今この子について（方針・メモ）の表示と保存 ---- */
+
+    function renderFocusCard(id) {
+      var card = $('focusCard');
+      if (!id) { card.classList.add('hidden'); return; }
+      var s = findStudent(id);
+      if (!s) { card.classList.add('hidden'); return; }
+
+      var policy = (s.teaching_policy || '').trim();
+      var memo = (s.memo || '').trim();
+      // 未記入のときは、何を書く欄なのかが伝わる薄い文言を出す
+      $('focusPolicyText').innerHTML = policy
+        ? escapeHtml(policy)
+        : '<span class="text-slate-400">未記入 — この子に今どう教えたいかを書くと、プリントの作り方に反映されます</span>';
+      $('focusMemoText').innerHTML = memo
+        ? escapeHtml(memo)
+        : '<span class="text-slate-400">未記入 — 次回やることや授業後の気づきを残せます</span>';
+
+      $('fPolicy').value = s.teaching_policy || '';
+      $('studentMemo').value = s.memo || '';
+      setFocusEditing(false);
+      card.classList.remove('hidden');
+    }
+
+    function setFocusEditing(editing) {
+      $('focusView').classList.toggle('hidden', editing);
+      $('focusEdit').classList.toggle('hidden', !editing);
+      $('focusEditBtn').classList.toggle('hidden', editing);
+      if (editing) $('fPolicy').focus();
+    }
+
+    $('focusEditBtn').addEventListener('click', function () { setFocusEditing(true); });
+    $('cancelFocusBtn').addEventListener('click', function () {
+      renderFocusCard(currentStudentId()); // 編集内容を破棄して元の値に戻す
+    });
+
+    $('saveFocusBtn').addEventListener('click', function () {
+      var studentId = currentStudentId();
+      if (!studentId) {
+        showToast('画面右上から生徒を選んでください', true);
+        return;
+      }
+      var s = findStudent(studentId);
+      if (!s) return;
+      var policy = $('fPolicy').value.trim();
+      var memo = $('studentMemo').value;
+
+      setBusy('saveFocusBtn', 'saveFocusBtnLabel', '保存中...', true, '保存');
+      // 方針はカルテの一項目なので saveStudent、メモは専用APIで更新する
+      var data = {
+        id: s.id, display_name: s.display_name, grade: s.grade,
+        learning_level: s.learning_level, short_term_goal: s.short_term_goal,
+        goal: s.goal, environment: s.environment, personality: s.personality,
+        teaching_policy: policy, memo: memo
+      };
+      runServer('saveStudent', [data], function () {
+        s.teaching_policy = policy;
+        s.memo = memo;
+        setBusy('saveFocusBtn', 'saveFocusBtnLabel', '', false, '保存');
+        // 保存中に別の生徒へ切り替えた場合、古い生徒のカードで画面を上書きしない
+        if (String(currentStudentId()) === String(studentId)) renderFocusCard(studentId);
+        showToast('保存しました');
+      }, function () {
+        setBusy('saveFocusBtn', 'saveFocusBtnLabel', '', false, '保存');
+      });
+    });
+
+    function loadLogs(studentId) {
+      if (String(currentStudentId()) !== String(studentId)) return;
+      $('logList').innerHTML = emptyState('読み込み中...');
+      runServer('getLogs', [studentId], function (json) {
+        // 取得中に生徒が切り替わった場合は古いログで画面を上書きしない
+        if (String(currentStudentId()) !== String(studentId)) return;
+        currentLogs = JSON.parse(json);
+        renderLogs();
+      });
+    }
+
+    /* ---- ログのフィルタ（デフォルト: 未定着のみ表示） ---- */
+    var logStatusFilter = '未定着';
+    var logTypeFilter = 'すべて';
+
+    /* セグメント型コントロールの選択状態（白＋影が選択中） */
+    function setSegmentActive(btns, activeBtn) {
+      btns.forEach(function (b) {
+        var active = (b === activeBtn);
+        b.classList.toggle('bg-white', active);
+        b.classList.toggle('text-slate-900', active);
+        b.classList.toggle('shadow-sm', active);
+        b.classList.toggle('text-slate-500', !active);
+      });
+    }
+
+    var statusFilterBtns = Array.prototype.slice.call(document.querySelectorAll('.status-filter-btn'));
+    statusFilterBtns.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        logStatusFilter = btn.dataset.statusFilter;
+        setSegmentActive(statusFilterBtns, btn);
+        renderLogs();
+      });
+    });
+
+    var typeFilterBtns = Array.prototype.slice.call(document.querySelectorAll('.type-filter-btn'));
+    typeFilterBtns.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        logTypeFilter = btn.dataset.typeFilter;
+        setSegmentActive(typeFilterBtns, btn);
+        renderLogs();
+      });
+    });
+
+    function isWordLog(item) {
+      return String(item).indexOf('単語: ') === 0;
+    }
+
+    /**
+     * ログを項目名の完全一致でグループ化する。
+     * 同じ項目を何度も間違えるのはよくあることなので、行は残したまま
+     * 表示上はまとめて回数を添える。ステータスは「1行でも未定着なら未定着」。
+     */
+    function groupLogs(logs) {
+      var map = {};
+      var order = [];
+      logs.forEach(function (l, i) {
+        if (!map[l.item]) {
+          map[l.item] = { item: l.item, count: 0, latestDate: '', hasWeak: false, lastSeq: 0 };
+          order.push(l.item);
+        }
+        var g = map[l.item];
+        // lastSeq = 最後に登録された順序（シートの行順）。並び替えの基準に使う
+        g.lastSeq = i;
+        g.count++;
+        if (l.status === '未定着') g.hasWeak = true;
+        if (String(l.date) > String(g.latestDate)) g.latestDate = l.date;
+      });
+      return order.map(function (k) {
+        var g = map[k];
+        g.status = g.hasWeak ? '未定着' : '定着';
+        return g;
+      });
+    }
+
+    function renderLogs() {
+      var list = $('logList');
+      var filters = $('logFilters');
+
+      if (currentLogs.length === 0) {
+        filters.classList.add('hidden');
+        list.innerHTML = emptyState('まだログがありません。上のフォームから追加できます');
+        return;
+      }
+
+      var groups = groupLogs(currentLogs);
+      var weak = groups.filter(function (g) { return g.status === '未定着'; }).length;
+      var done = groups.length - weak;
+      // 件数は絞り込みボタン自体に表示する（別行の統計を持たない）
+      $('cntWeak').textContent = weak;
+      $('cntDone').textContent = done;
+      $('cntAll').textContent = groups.length;
+      filters.classList.remove('hidden');
+
+      // 種類の絞り込みは、文法と単語が両方あるときだけ意味を持つ
+      var hasWord = groups.some(function (g) { return isWordLog(g.item); });
+      var hasGrammar = groups.some(function (g) { return !isWordLog(g.item); });
+      $('typeFilterWrap').classList.toggle('hidden', !(hasWord && hasGrammar));
+      $('typeFilterWrap').classList.toggle('flex', hasWord && hasGrammar);
+
+      // フィルタ適用（ステータス × 種類）
+      var filtered = groups.filter(function (g) {
+        if (logStatusFilter !== 'すべて' && g.status !== logStatusFilter) return false;
+        if (logTypeFilter === '単語' && !isWordLog(g.item)) return false;
+        if (logTypeFilter === '文法' && isWordLog(g.item)) return false;
+        return true;
+      });
+
+      if (filtered.length === 0) {
+        list.innerHTML = emptyState('この条件に当てはまるログはありません');
+        return;
+      }
+
+      // 未定着を上に、その中は新しく登録したものが上
+      var sorted = filtered.slice().sort(function (a, b) {
+        if (a.status !== b.status) return a.status === '未定着' ? -1 : 1;
+        return b.lastSeq - a.lastSeq;
+      });
+
+      list.innerHTML = sorted.map(function (g) {
+        var isWeak = (g.status === '未定着');
+        var chip = isWeak
+          ? '<span class="inline-flex items-center rounded-full bg-amber-100 text-amber-800 px-2.5 py-0.5 text-xs font-medium shrink-0">未定着</span>'
+          : '<span class="inline-flex items-center rounded-full bg-emerald-100 text-emerald-800 px-2.5 py-0.5 text-xs font-medium shrink-0">定着</span>';
+        var btnLabel = isWeak ? '定着にする' : '未定着に戻す';
+        var next = isWeak ? '定着' : '未定着';
+        var countBadge = (g.count >= 2)
+          ? ' <span class="text-[11px] font-normal text-slate-400">×' + g.count + '</span>'
+          : '';
+        return ''
+          + '<div class="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">'
+          +   '<div class="w-full sm:w-auto sm:flex-1 flex items-start gap-3 min-w-0">'
+          +   chip
+          +   '<div class="flex-1 min-w-0">'
+          +     '<p class="text-sm font-medium text-slate-800 break-words [overflow-wrap:anywhere]">' + escapeHtml(g.item) + countBadge + '</p>'
+          +     '<p class="text-xs text-slate-400 mt-0.5">' + escapeHtml(g.latestDate) + '</p>'
+          +   '</div>'
+          +   '</div>'
+          +   '<div class="flex items-center gap-2 ml-auto">'
+          +   '<button type="button" data-next="' + next + '" data-item="' + escapeHtml(g.item) + '"'
+          +     ' class="toggle-log-btn shrink-0 whitespace-nowrap rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-400 transition-colors">'
+          +     btnLabel
+          +   '</button>'
+          +   '<button type="button" data-item="' + escapeHtml(g.item) + '" data-count="' + g.count + '"'
+          +     ' class="delete-log-btn shrink-0 rounded-lg border border-slate-300 bg-white p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 hover:border-red-200 focus:outline-none focus:ring-2 focus:ring-red-300 transition-colors" aria-label="この項目を削除">'
+          +     '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="w-4 h-4">'
+          +       '<path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />'
+          +     '</svg>'
+          +   '</button>'
+          +   '</div>'
+          + '</div>';
+      }).join('');
+
+      var studentId = currentStudentId();
+
+      list.querySelectorAll('.toggle-log-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var next = btn.dataset.next;
+          var item = btn.dataset.item;
+          btn.disabled = true;
+          btn.textContent = '更新中...';
+          runServer('setLogStatusByItem', [studentId, item, next], function () {
+            // 操作対象の生徒を表示中の場合だけローカル状態を更新する
+            if (String(currentStudentId()) === String(studentId)) {
+              currentLogs.forEach(function (l) {
+                if (l.item === item) l.status = next;
+              });
+              renderLogs();
+            }
+            showToast('「' + next + '」に切り替えました');
+          }, function () {
+            if (String(currentStudentId()) === String(studentId)) loadLogs(studentId);
+          });
+        });
+      });
+
+      list.querySelectorAll('.delete-log-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var item = btn.dataset.item;
+          var count = parseInt(btn.dataset.count, 10) || 1;
+          var msg = (count >= 2)
+            ? '「' + item + '」を削除しますか？（' + count + '回分の登録をすべて削除します。この操作は取り消せません）'
+            : '「' + item + '」を削除しますか？ この操作は取り消せません。';
+          if (!window.confirm(msg)) return;
+          btn.disabled = true;
+          runServer('deleteLogsByItem', [studentId, item], function () {
+            showToast('ログを削除しました');
+            if (String(currentStudentId()) === String(studentId)) loadLogs(studentId);
+          }, function () {
+            if (String(currentStudentId()) === String(studentId)) loadLogs(studentId);
+          });
+        });
+      });
+    }
+
+    $('addLogBtn').addEventListener('click', addLogItem);
+    $('newLogItem').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); addLogItem(); }
+    });
+
+    /* 項目の種類切替（単語選択時は「単語: 」を自動で付与するので手打ち不要） */
+    var newLogType = '文法';
+    var newLogTypeBtns = Array.prototype.slice.call(document.querySelectorAll('.new-log-type-btn'));
+    newLogTypeBtns.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        newLogType = btn.dataset.newLogType;
+        setSegmentActive(newLogTypeBtns, btn);
+        $('newLogItem').placeholder = (newLogType === '単語') ? '例: prove' : '例: 仮定法過去完了の形';
+      });
+    });
+
+    function addLogItem() {
+      var studentId = currentStudentId();
+      var item = $('newLogItem').value.trim();
+      if (!studentId) {
+        showToast('画面右上から生徒を選んでください', true);
+        return;
+      }
+      if (!item) {
+        showToast('項目名を入力してください', true);
+        $('newLogItem').focus();
+        return;
+      }
+      // 種類「単語」のときはプレフィックスを自動付与（手打ち済みなら二重にしない）
+      if (newLogType === '単語' && item.indexOf('単語: ') !== 0) {
+        item = '単語: ' + item;
+      }
+      $('addLogBtn').disabled = true;
+      runServer('saveLog', [studentId, item], function () {
+        $('addLogBtn').disabled = false;
+        $('newLogItem').value = '';
+        showToast('未定着項目を追加しました');
+        loadLogs(studentId);
+      }, function () {
+        $('addLogBtn').disabled = false;
+      });
+    }
+
+    /* ================================
+       あとで記録（授業後のチェック項目）
+    ================================ */
+    var pendingChecks = [];
+
+    function todayStr() {
+      var d = new Date();
+      return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+    }
+
+    function daysAgo(dateStr) {
+      var d = new Date(String(dateStr).replace(/-/g, '/'));
+      if (isNaN(d.getTime())) return 0;
+      return Math.floor((new Date(todayStr().replace(/-/g, '/')) - new Date(dateStr.substring(0, 10).replace(/-/g, '/'))) / 86400000);
+    }
+
+    function loadPendingChecks() {
+      runServer('getPendingChecks', [], function (json) {
+        pendingChecks = JSON.parse(json);
+        renderPendingChecks();
+      }, function () { /* 失敗しても通常操作は妨げない */ });
+    }
+
+    function renderPendingChecks() {
+      var panel = $('pendingPanel');
+      var dot = $('pendingDot');
+      if (pendingChecks.length === 0) {
+        panel.classList.add('hidden');
+        dot.classList.add('hidden');
+        return;
+      }
+      panel.classList.remove('hidden');
+      dot.classList.remove('hidden');
+      $('pendingCount').textContent = pendingChecks.length + '件';
+
+      var today = todayStr();
+      var todayItems = pendingChecks.filter(function (p) { return String(p.datetime).substring(0, 10) === today; });
+      var olderItems = pendingChecks.filter(function (p) { return String(p.datetime).substring(0, 10) !== today; });
+
+      var html = '';
+      if (todayItems.length > 0) {
+        html += '<div class="text-xs font-semibold text-slate-500 mt-1">今日</div>';
+        html += groupByStudent(todayItems);
+      }
+      if (olderItems.length > 0) {
+        // 前日以前は折りたたむ。目に入るが、当日の作業の邪魔にならないように
+        html += ''
+          + '<details class="mt-1 rounded-xl border border-slate-200 bg-white/70">'
+          +   '<summary class="cursor-pointer list-none px-3 py-2 text-xs font-semibold text-slate-600 flex items-center gap-1.5">'
+          +     '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-3 h-3">'
+          +       '<path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" /></svg>'
+          +     '前日以前の未処理 ' + olderItems.length + '件'
+          +   '</summary>'
+          +   '<div class="grid gap-3 p-3 pt-1">' + groupByStudent(olderItems) + '</div>'
+          + '</details>';
+      }
+      $('pendingList').innerHTML = html;
+      bindPendingHandlers();
+    }
+
+    /* 生徒ごとにまとめ、その中はプリント単位で並べる（同じ項目が2枚に出たら2回表示する） */
+    function groupByStudent(list) {
+      var order = [], byStudent = {};
+      list.forEach(function (p) {
+        if (!byStudent[p.student_id]) { byStudent[p.student_id] = []; order.push(p.student_id); }
+        byStudent[p.student_id].push(p);
+      });
+
+      return order.map(function (sid) {
+        var s = findStudent(sid);
+        var name = s ? s.display_name + (s.grade ? '（' + s.grade + '）' : '') : '（削除された生徒）';
+        var cards = byStudent[sid].map(function (p) {
+          var time = String(p.datetime).length >= 16 ? String(p.datetime).substring(11, 16) : '';
+          var d = daysAgo(p.datetime);
+          var stale = d >= 14
+            ? '<span class="text-[10px] text-slate-400">・記憶が曖昧なら破棄してください</span>' : '';
+          var dateLabel = d === 0 ? time : String(p.datetime).substring(5, 10).replace('-', '/') + ' ' + time;
+          var items = p.items.map(function (item, i) {
+            return ''
+              + '<label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm cursor-pointer has-[:checked]:border-amber-500 has-[:checked]:bg-amber-50 transition-colors">'
+              +   '<input type="checkbox" data-item="' + escapeHtml(item) + '"'
+              +     ' class="pending-cb rounded border-slate-300 text-amber-600 focus:ring-amber-400">'
+              +   '<span class="text-slate-800">' + escapeHtml(item) + '</span>'
+              + '</label>';
+          }).join('');
+          return ''
+            + '<div class="pending-card rounded-xl border border-slate-200 bg-white p-3" data-pending="' + escapeHtml(p.id) + '" data-student="' + escapeHtml(sid) + '">'
+            +   '<div class="flex items-start justify-between gap-2 mb-2">'
+            +     '<div class="min-w-0">'
+            +       '<p class="text-sm font-medium text-slate-800 break-words">' + escapeHtml(p.title) + '</p>'
+            +       '<p class="text-[11px] text-slate-400">' + escapeHtml(dateLabel) + ' ' + stale + '</p>'
+            +     '</div>'
+            +     '<button type="button" class="pending-skip shrink-0 rounded-lg p-1 text-slate-300 hover:text-slate-600 hover:bg-slate-100 transition-colors" aria-label="記録せずに閉じる">'
+            +       '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4">'
+            +         '<path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>'
+            +     '</button>'
+            +   '</div>'
+            +   '<div class="grid gap-1.5 mb-2">' + items + '</div>'
+            +   '<button type="button" class="pending-save w-full rounded-lg bg-slate-800 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-1 disabled:opacity-50 transition-colors">'
+            +     '記録する'
+            +   '</button>'
+            + '</div>';
+        }).join('');
+        return ''
+          + '<div class="grid gap-2">'
+          +   '<p class="text-sm font-semibold text-slate-700">' + escapeHtml(name) + '</p>'
+          +   cards
+          + '</div>';
+      }).join('');
+    }
+
+    function bindPendingHandlers() {
+      $('pendingList').querySelectorAll('.pending-card').forEach(function (card) {
+        var pid = card.dataset.pending;
+        var sid = card.dataset.student;
+
+        card.querySelector('.pending-save').addEventListener('click', function (e) {
+          var btn = e.currentTarget;
+          var items = Array.prototype.slice.call(card.querySelectorAll('.pending-cb:checked'))
+            .map(function (cb) { return cb.dataset.item; });
+          btn.disabled = true;
+          btn.textContent = '記録中...';
+          runServer('resolvePendingCheck', [pid, sid, items], function (json) {
+            var res = JSON.parse(json);
+            showToast(res.count > 0 ? res.count + '件を未定着として記録しました' : '記録済みにしました');
+            pendingChecks = pendingChecks.filter(function (p) { return String(p.id) !== String(pid); });
+            renderPendingChecks();
+            if (currentStudentId() === sid) loadLogs(sid);
+          }, function () {
+            btn.disabled = false;
+            btn.textContent = '記録する';
+            loadPendingChecks();
+          });
+        });
+
+        card.querySelector('.pending-skip').addEventListener('click', function () {
+          if (!window.confirm('このプリントを記録せずに閉じますか？')) return;
+          runServer('resolvePendingCheck', [pid, sid, []], function () {
+            showToast('記録済みにしました');
+            pendingChecks = pendingChecks.filter(function (p) { return String(p.id) !== String(pid); });
+            renderPendingChecks();
+          }, function () { loadPendingChecks(); });
+        });
+      });
+    }
+
+    /* ================================
+       初期化
+    ================================ */
+    loadStudents(false);
+  </script>
+</body>
+</html>
